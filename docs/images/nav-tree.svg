@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 210" font-family="ui-monospace, 'Cascadia Code', Menlo, monospace">
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#a81d2d"/>
+    </marker>
+  </defs>
+
+  <!-- Left: index.adoc source -->
+  <text x="10" y="20" font-size="11" font-weight="700" fill="#3f1116" font-family="system-ui">index.adoc</text>
+  <rect x="6" y="28" width="200" height="168" rx="6" fill="#fff7f6" stroke="#e8c7c0" stroke-width="1.2"/>
+
+  <text x="18" y="48" font-size="10.5" fill="#7c3a3f">= My Docs</text>
+  <text x="18" y="64" font-size="10.5" fill="#3f1116">include::intro.adoc[]</text>
+  <text x="18" y="80" font-size="10.5" fill="#3f1116">include::guide/index.adoc[]</text>
+  <text x="18" y="112" font-size="10.5" fill="#7c3a3f">  = Guide</text>
+  <text x="18" y="128" font-size="10.5" fill="#7c3a3f">  include::nav.adoc[]</text>
+  <text x="18" y="144" font-size="10.5" fill="#7c3a3f">  include::writing.adoc[]</text>
+  <line x1="14" y1="88" x2="14" y2="148" stroke="#e8c7c0" stroke-width="1"/>
+  <line x1="14" y1="96" x2="18" y2="96" stroke="#e8c7c0" stroke-width="1"/>
+  <text x="18" y="168" font-size="10.5" fill="#3f1116">include::reference/index.adoc[]</text>
+  <text x="18" y="185" font-size="10.5" fill="#7c3a3f">  = Reference</text>
+
+  <!-- Arrow -->
+  <line x1="214" y1="105" x2="268" y2="105" stroke="#a81d2d" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Right: sidebar visual -->
+  <text x="278" y="20" font-size="11" font-weight="700" fill="#3f1116" font-family="system-ui">Sidebar</text>
+  <rect x="274" y="28" width="230" height="168" rx="6" fill="#ffffff" stroke="#e8c7c0" stroke-width="1.2"/>
+
+  <!-- brand -->
+  <rect x="278" y="32" width="222" height="24" rx="4" fill="#fff0ee"/>
+  <text x="288" y="48" font-size="11" font-weight="700" fill="#a81d2d" font-family="system-ui">My Docs</text>
+
+  <!-- intro link -->
+  <text x="288" y="74" font-size="11" fill="#7c3a3f" font-family="system-ui">Intro</text>
+
+  <!-- Guide group (open) -->
+  <rect x="278" y="80" width="222" height="22" rx="4" fill="#fff0ee"/>
+  <text x="288" y="95" font-size="11" font-weight="600" fill="#3f1116" font-family="system-ui">▾ Guide</text>
+  <text x="300" y="115" font-size="10.5" fill="#7c3a3f" font-family="system-ui">Navigation</text>
+  <text x="300" y="131" font-size="10.5" fill="#7c3a3f" font-family="system-ui">Writing Content</text>
+  <line x1="293" y1="104" x2="293" y2="135" stroke="#e8c7c0" stroke-width="1"/>
+
+  <!-- Reference group (closed) -->
+  <rect x="278" y="140" width="222" height="22" rx="4" fill="#fff0ee"/>
+  <text x="288" y="155" font-size="11" font-weight="600" fill="#3f1116" font-family="system-ui">▸ Reference</text>
+</svg>

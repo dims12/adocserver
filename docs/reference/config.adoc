@@ -1,0 +1,96 @@
+= Configuration Reference
+
+Place a `docserver.config.js` file in your docs directory to customise the server.
+The file is optional — adocserver works without it.
+
+[source,javascript]
+----
+// docserver.config.js
+export default {
+  title: 'My Project',
+  accent: '#2563eb',
+  accentStrong: '#1d4ed8',
+  logo: '/logo.png',
+}
+----
+
+== Options
+
+=== `title`
+
+[horizontal]
+Type:: `string`
+Default:: `'Docs'`
+
+The site name. Shown as the sidebar brand when no logo is set, and appended to every page title (`Page Title — My Project`).
+
+=== `accent`
+
+[horizontal]
+Type:: `string` (CSS colour)
+Default:: `'#a81d2d'`
+
+Primary accent colour. Used for active nav items, links, the sidebar resize handle, and admonition borders.
+
+=== `accentStrong`
+
+[horizontal]
+Type:: `string` (CSS colour)
+Default:: `'#7f1321'`
+
+Hover/active variant of the accent colour.
+
+=== `logo`
+
+[horizontal]
+Type:: `string` (URL)
+Default:: _(none — shows title text)_
+
+URL of the logo image shown in the sidebar brand area.
+The easiest way to serve a local image is to place it in a `public/` subdirectory of your docs folder
+(Vite serves `public/` as the root automatically):
+
+[source]
+----
+docs/
+├── index.adoc
+├── docserver.config.js
+└── public/
+    └── logo.png        ← served as /logo.png
+----
+
+[source,javascript]
+----
+// docserver.config.js
+export default {
+  logo: '/logo.png',
+}
+----
+
+== Full example
+
+[source]
+----
+docs/
+├── index.adoc
+├── docserver.config.js
+├── public/
+│   └── logo.svg
+├── guide/
+│   ├── index.adoc
+│   └── ...
+└── reference/
+    ├── index.adoc
+    └── ...
+----
+
+[source,javascript]
+----
+// docserver.config.js
+export default {
+  title: 'My Project',
+  accent: '#0f766e',
+  accentStrong: '#0d6561',
+  logo: '/logo.svg',
+}
+----

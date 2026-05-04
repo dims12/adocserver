@@ -1,0 +1,32 @@
+{
+  "name": "adocserver",
+  "version": "0.1.0",
+  "description": "Zero-config AsciiDoc dev server with sidebar navigation and live reload",
+  "type": "module",
+  "bin": {
+    "adocserver": "./bin/adocserver.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "assets"
+  ],
+  "scripts": {
+    "start": "node bin/adocserver.js"
+  },
+  "dependencies": {
+    "asciidoctor": "^3.0.4",
+    "vite": "^6.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "asciidoc",
+    "docs",
+    "documentation",
+    "vite",
+    "dev-server"
+  ],
+  "license": "MIT"
+}

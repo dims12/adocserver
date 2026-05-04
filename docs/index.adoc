@@ -1,0 +1,16 @@
+= adocserver
+:description: Zero-config AsciiDoc documentation server
+:doctype: book
+:imagesdir: images
+:stem: latexmath
+
+Serve a directory of AsciiDoc files as a live documentation site — with sidebar navigation, live reload, syntax highlighting, and math rendering.
+
+[source,bash]
+----
+npx adocserver ./docs
+----
+
+include::quickstart.adoc[]
+include::guide/index.adoc[]
+include::reference/index.adoc[]

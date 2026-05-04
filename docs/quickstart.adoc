@@ -1,0 +1,46 @@
+= Quick Start
+
+== Installation
+
+No installation needed — run directly with npx:
+
+[source,bash]
+----
+npx adocserver ./docs
+----
+
+Or install globally if you use it often:
+
+[source,bash]
+----
+npm install -g adocserver
+adocserver ./docs
+----
+
+== Minimal setup
+
+Your docs directory needs one required file — `index.adoc` — which acts as the entry point for navigation.
+Everything else follows from its `include::` directives.
+
+[source]
+----
+docs/
+├── index.adoc      <1>
+├── intro.adoc
+└── usage.adoc
+----
+<1> Required. Defines the navigation tree via `include::` directives.
+
+A minimal `index.adoc`:
+
+[source,asciidoc]
+----
+= My Project Docs
+
+\include::intro.adoc[]
+\include::usage.adoc[]
+----
+
+That's all you need. Run `adocserver ./docs` and open your browser.
+
+TIP: The server binds to all network interfaces by default (`0.0.0.0`), so colleagues on the same LAN can reach it by your machine's IP.

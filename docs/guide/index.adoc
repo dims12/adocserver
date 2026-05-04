@@ -1,0 +1,4 @@
+= Guide
+
+include::navigation.adoc[]
+include::writing.adoc[]

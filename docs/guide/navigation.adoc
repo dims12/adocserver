@@ -1,0 +1,59 @@
+= Navigation
+
+Navigation is driven entirely by `include::` directives in your `.adoc` files.
+No config file, no YAML front matter — the structure you write is the structure you get.
+
+== How it works
+
+adocserver reads your `index.adoc` and walks its `include::` graph to build the sidebar tree.
+Each included file becomes a nav entry; its title comes from the `= Title` line at the top.
+
+[source,asciidoc]
+----
+= My Docs                        <1>
+
+\include::overview.adoc[]         <2>
+\include::guide/index.adoc[]      <3>
+\include::reference/index.adoc[]  <3>
+----
+<1> The root title — shown in the browser tab but not in the sidebar.
+<2> A leaf page — appears as a direct nav link.
+<3> A section with children — `guide/index.adoc` can itself include more files.
+
+== Custom labels
+
+By default, the nav label is taken from the `= Title` of the included file.
+Override it in the `include::` attribute list:
+
+[source,asciidoc]
+----
+\include::api-reference.adoc[API Docs]
+----
+
+== Nesting
+
+Nesting works to any depth. Each `index.adoc` that contains its own `include::` lines
+creates a collapsible group in the sidebar.
+
+[source]
+----
+docs/
+├── index.adoc
+├── intro.adoc
+├── guide/
+│   ├── index.adoc       ← includes navigation.adoc and writing.adoc
+│   ├── navigation.adoc
+│   └── writing.adoc
+└── reference/
+    ├── index.adoc       ← includes config.adoc and cli.adoc
+    ├── config.adoc
+    └── cli.adoc
+----
+
+== Index pages
+
+When you navigate to a section (`/docs/guide/`), adocserver renders its `index.adoc`
+with `include::` lines replaced by clickable links — so you get a natural landing page
+listing the section's contents, without having to maintain that list manually.
+
+NOTE: Files not reachable from `index.adoc` via `include::` chains are not shown in the sidebar, but are still served if you link to them directly.

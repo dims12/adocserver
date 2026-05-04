@@ -1,0 +1,167 @@
+= Writing Content
+
+adocserver renders standard AsciiDoc via https://asciidoctor.org[Asciidoctor].
+Everything Asciidoctor supports works here.
+
+== Images
+
+Place images in an `images/` subdirectory inside your docs root and reference them by filename only.
+adocserver sets `imagesdir` to `/images` for the browser and the root `index.adoc` sets it to `images`
+for CLI tools like `asciidoctor-pdf`, so the same filename works in both.
+
+[source]
+----
+docs/
+├── index.adoc
+└── images/
+    ├── pipeline.svg
+    └── nav-tree.svg
+----
+
+[source,asciidoc]
+----
+image::pipeline.svg[Processing pipeline, 560]
+----
+
+Here is how adocserver turns your source files into a live site:
+
+image::pipeline.svg[adocserver processing pipeline, 560]
+
+And here is how `include::` directives map to the sidebar navigation:
+
+image::nav-tree.svg[Navigation tree, 520]
+
+You can specify width and height, add links, and use floats — the full Asciidoctor image macro syntax applies.
+
+[source,asciidoc]
+----
+image::diagram.png[Diagram, 400, link=https://example.com]
+image::icon.svg[Icon, 32, 32, float=right]
+----
+
+== Code blocks
+
+Syntax highlighting is provided by https://highlightjs.org[highlight.js] and works automatically for all common languages.
+
+[source,python]
+----
+from dataclasses import dataclass
+from typing import Iterator
+
+@dataclass
+class NavNode:
+    label: str
+    href: str
+    children: list["NavNode"]
+
+def walk(node: NavNode) -> Iterator[NavNode]:
+    yield node
+    for child in node.children:
+        yield from walk(child)
+----
+
+[source,typescript]
+----
+async function renderPage(filePath: string): Promise<string> {
+  const source = await fs.readFile(filePath, "utf8")
+  const doc = adoc.load(source, { safe: "safe", base_dir: path.dirname(filePath) })
+  return doc.convert() as string
+}
+----
+
+== Math
+
+Math rendering is provided by https://www.mathjax.org[MathJax] in the browser and by
+https://github.com/asciidoctor/asciidoctor-mathematical[asciidoctor-mathematical] in PDF.
+Set `:stem: latexmath` in your root `index.adoc` (already done here) and use AsciiDoc stem macros.
+
+=== Inline math
+
+Use `stem:[...]` for inline expressions.
+
+The energy-mass equivalence stem:[E = mc^2] and the quadratic formula
+stem:[x = \dfrac{-b \pm \sqrt{b^2 - 4ac}}{2a}] both render inline.
+
+=== Display math
+
+Use a `[stem]` block for display equations.
+
+Euler's identity, often called the most beautiful equation in mathematics:
+
+[stem]
+++++
+e^{i\pi} + 1 = 0
+++++
+
+The Gaussian integral:
+
+[stem]
+++++
+\int_{-\infty}^{\infty} e^{-x^2}\, dx = \sqrt{\pi}
+++++
+
+The continuous Fourier transform:
+
+[stem]
+++++
+\hat{f}(\xi) = \int_{-\infty}^{\infty} f(x)\, e^{-2\pi i x \xi}\, dx
+++++
+
+Maxwell's equations in differential form:
+
+[stem]
+++++
+\nabla \cdot \mathbf{E} = \frac{\rho}{\varepsilon_0}, \qquad
+\nabla \cdot \mathbf{B} = 0
+++++
+
+[stem]
+++++
+\nabla \times \mathbf{E} = -\frac{\partial \mathbf{B}}{\partial t}, \qquad
+\nabla \times \mathbf{B} = \mu_0\!\left(\mathbf{J} + \varepsilon_0 \frac{\partial \mathbf{E}}{\partial t}\right)
+++++
+
+== Admonitions
+
+NOTE: Use notes for supplemental information that is helpful but not critical.
+
+TIP: Use tips for shortcuts, recommendations, or best practices.
+
+WARNING: Use warnings to flag things that could go wrong or cause confusion.
+
+IMPORTANT: Use important for information the reader must not skip.
+
+== Tables
+
+[%header,cols="1,2,1"]
+|===
+|Option |Description |Default
+
+|`title`
+|Site name in sidebar and page titles
+|`Docs`
+
+|`accent`
+|Primary accent colour
+|`#a81d2d`
+
+|`accentStrong`
+|Hover/active colour variant
+|`#7f1321`
+
+|`logo`
+|Logo URL shown in sidebar brand
+|_(text title)_
+|===
+
+== Callout lists
+
+[source,bash]
+----
+adocserver ./docs \  # <1>
+  --port 4000 \      # <2>
+  --open             # <3>
+----
+<1> Path to your docs directory.
+<2> Override the default port (3000).
+<3> Open the browser automatically on start.

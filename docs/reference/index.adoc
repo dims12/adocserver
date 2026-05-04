@@ -1,0 +1,4 @@
+= Reference
+
+include::cli.adoc[]
+include::config.adoc[]
