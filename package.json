@@ -4,7 +4,7 @@
   "description": "Zero-config AsciiDoc dev server with sidebar navigation and live reload",
   "type": "module",
   "bin": {
-    "adocserver": "./bin/adocserver.js"
+    "adocserver": "bin/adocserver.js"
   },
   "files": [
     "bin",
