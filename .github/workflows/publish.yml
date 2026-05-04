@@ -9,6 +9,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     if: github.server_url == 'https://github.com'
+    environment: npmjs
     permissions:
       contents: read
       id-token: write
