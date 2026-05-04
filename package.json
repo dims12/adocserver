@@ -1,6 +1,6 @@
 {
   "name": "adocserver",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Zero-config AsciiDoc dev server with sidebar navigation and live reload",
   "type": "module",
   "bin": {
