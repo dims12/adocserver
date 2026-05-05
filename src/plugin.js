@@ -8,6 +8,10 @@ const adoc = asciidoctor()
 // Matches local include:: directives (relative path, no attribute references).
 const INCLUDE_RE = /^include::([^{\[\s]+\.adoc)\[([^\]]*)\]\s*$/gm
 
+function applyTemplate(tmpl, slots) {
+  return tmpl.replace(/\{\{(\w+)\}\}/g, (_, k) => slots[k] ?? '')
+}
+
 // ---- Nav tree ----------------------------------------------------------
 
 function fileToHref(file, docsDir) {
@@ -181,14 +185,11 @@ function renderSidebar(navRoot, defaultLanding, currentPath, toc, siteTitle, log
 
 // ---- Page shell --------------------------------------------------------
 
-function renderPage(bodyHtml, title, currentPath, toc, navRoot, defaultLanding, siteConfig) {
-  const { siteTitle, logo, accent, accentStrong } = siteConfig
-  return `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
+// Functional head content: HMR client, math, syntax highlighting, favicon.
+// Included in {{head}} for custom templates; merged into <head> for the built-in shell.
+function buildHead() {
+  return `<meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${title}</title>
     <script type="module" src="/@vite/client"></script>
     <script>
       window.MathJax = {
@@ -200,7 +201,80 @@ function renderPage(bodyHtml, title, currentPath, toc, navRoot, defaultLanding, 
     </script>
     <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
     <link rel="icon" type="image/svg+xml" href="/_adocserver/favicon.svg" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github.min.css" />`
+}
+
+// Body scripts: syntax highlighting init + sidebar resize handle.
+// Included in {{scripts}} for custom templates; placed before </body> in built-in shell.
+function buildScripts() {
+  return `<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
+    <script>window.hljs?.highlightAll()</script>
+    <script>
+      (function () {
+        const sidebar = document.getElementById('site-sidebar')
+        const resizer = document.getElementById('sidebar-resizer')
+        if (!sidebar || !resizer) return
+        const STORAGE_KEY = 'adocserver-sidebar-w'
+        const MIN_W = 140, MAX_W = 480
+
+        const saved = parseInt(localStorage.getItem(STORAGE_KEY) ?? '', 10)
+        if (saved >= MIN_W && saved <= MAX_W) {
+          sidebar.style.width = saved + 'px'
+          document.documentElement.style.setProperty('--sidebar-w', saved + 'px')
+        }
+
+        let startX = null, startW = null
+        resizer.addEventListener('mousedown', e => {
+          startX = e.clientX
+          startW = sidebar.getBoundingClientRect().width
+          resizer.classList.add('dragging')
+          document.body.style.userSelect = 'none'
+          document.body.style.cursor = 'col-resize'
+          e.preventDefault()
+        })
+        document.addEventListener('mousemove', e => {
+          if (startX === null) return
+          const w = Math.max(MIN_W, Math.min(MAX_W, startW + e.clientX - startX))
+          sidebar.style.width = w + 'px'
+          document.documentElement.style.setProperty('--sidebar-w', w + 'px')
+        })
+        document.addEventListener('mouseup', () => {
+          if (startX === null) return
+          localStorage.setItem(STORAGE_KEY, parseInt(sidebar.style.width, 10).toString())
+          startX = null; startW = null
+          resizer.classList.remove('dragging')
+          document.body.style.userSelect = ''
+          document.body.style.cursor = ''
+        })
+      })()
+    </script>`
+}
+
+function renderPage(bodyHtml, title, currentPath, toc, navRoot, defaultLanding, siteConfig, opts = {}) {
+  const { customCss, templateContent } = opts
+  const { siteTitle, logo, accent, accentStrong } = siteConfig
+
+  const sidebarHtml = renderSidebar(navRoot, defaultLanding, currentPath, toc, siteTitle, logo)
+  const head        = buildHead()
+  const scripts     = buildScripts()
+
+  if (templateContent) {
+    return applyTemplate(templateContent, {
+      title,
+      head,
+      sidebar: sidebarHtml,
+      body:    bodyHtml,
+      scripts,
+    })
+  }
+
+  const customCssTag = customCss ? `\n    <link rel="stylesheet" href="${customCss}" />` : ''
+
+  return `<!doctype html>
+<html>
+  <head>
+    <title>${title}</title>
+    ${head}
     <style>
       :root {
         --bg: #fff7f6;
@@ -380,56 +454,16 @@ function renderPage(bodyHtml, title, currentPath, toc, navRoot, defaultLanding, 
       #content-wrap ul.section-list a:hover {
         background: var(--accent); color: #fff; border-color: var(--accent);
       }
-    </style>
+    </style>${customCssTag}
   </head>
   <body>
-    ${renderSidebar(navRoot, defaultLanding, currentPath, toc, siteTitle, logo)}
+    ${sidebarHtml}
     <main class="site-main">
       <div id="content-wrap">
         ${bodyHtml}
       </div>
     </main>
-    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
-    <script>window.hljs?.highlightAll()</script>
-    <script>
-      (function () {
-        const sidebar = document.getElementById('site-sidebar')
-        const resizer = document.getElementById('sidebar-resizer')
-        if (!sidebar || !resizer) return
-        const STORAGE_KEY = 'adocserver-sidebar-w'
-        const MIN_W = 140, MAX_W = 480
-
-        const saved = parseInt(localStorage.getItem(STORAGE_KEY) ?? '', 10)
-        if (saved >= MIN_W && saved <= MAX_W) {
-          sidebar.style.width = saved + 'px'
-          document.documentElement.style.setProperty('--sidebar-w', saved + 'px')
-        }
-
-        let startX = null, startW = null
-        resizer.addEventListener('mousedown', e => {
-          startX = e.clientX
-          startW = sidebar.getBoundingClientRect().width
-          resizer.classList.add('dragging')
-          document.body.style.userSelect = 'none'
-          document.body.style.cursor = 'col-resize'
-          e.preventDefault()
-        })
-        document.addEventListener('mousemove', e => {
-          if (startX === null) return
-          const w = Math.max(MIN_W, Math.min(MAX_W, startW + e.clientX - startX))
-          sidebar.style.width = w + 'px'
-          document.documentElement.style.setProperty('--sidebar-w', w + 'px')
-        })
-        document.addEventListener('mouseup', () => {
-          if (startX === null) return
-          localStorage.setItem(STORAGE_KEY, parseInt(sidebar.style.width, 10).toString())
-          startX = null; startW = null
-          resizer.classList.remove('dragging')
-          document.body.style.userSelect = ''
-          document.body.style.cursor = ''
-        })
-      })()
-    </script>
+    ${scripts}
   </body>
 </html>`
 }
@@ -441,6 +475,10 @@ export function createAdocPlugin({ docsDir, assetsDir, config }) {
   const accent       = config.accent       ?? '#a81d2d'
   const accentStrong = config.accentStrong ?? '#7f1321'
   const logo         = config.logo         ?? null
+
+  // Explicit overrides from docserver.config.js
+  const explicitCss      = config.css      ?? null
+  const explicitTemplate = config.template ? path.resolve(docsDir, config.template) : null
 
   const siteConfig = { siteTitle, logo, accent, accentStrong }
   const DOCS_INDEX = path.resolve(docsDir, 'index.adoc')
@@ -498,6 +536,15 @@ export function createAdocPlugin({ docsDir, assetsDir, config }) {
         if (!filePath) return next()
 
         try {
+          // Resolve custom CSS: explicit config wins, then auto-detect custom.css
+          const customCss = explicitCss
+            ?? (existsSync(path.resolve(docsDir, 'custom.css')) ? '/custom.css' : null)
+
+          // Resolve template: explicit config wins, then auto-detect template.html
+          const templateFile = explicitTemplate
+            ?? (existsSync(path.resolve(docsDir, 'template.html')) ? path.resolve(docsDir, 'template.html') : null)
+          const templateContent = templateFile ? await fs.readFile(templateFile, 'utf8') : null
+
           const rawSource = await fs.readFile(filePath, 'utf8')
           const source    = path.basename(filePath) === 'index.adoc'
             ? await preprocessIncludes(rawSource, path.dirname(filePath), docsDir)
@@ -507,14 +554,18 @@ export function createAdocPlugin({ docsDir, assetsDir, config }) {
           const toc  = extractDocSections(doc)
           const title = (html.match(/<h1[^>]*>([^<]+)<\/h1>/) ?? [])[1] ?? siteTitle
           res.setHeader('Content-Type', 'text/html; charset=utf-8')
-          res.end(renderPage(html, `${title} — ${siteTitle}`, pathname, toc, navRoot, defaultLanding, siteConfig))
+          res.end(renderPage(html, `${title} — ${siteTitle}`, pathname, toc, navRoot, defaultLanding, siteConfig, { customCss, templateContent }))
         } catch { next() }
       })
     },
 
     handleHotUpdate({ file, server }) {
-      if (file.endsWith('.adoc') && file.startsWith(docsDir + path.sep)) {
-        rebuildNav()
+      const isAdoc = file.endsWith('.adoc') && file.startsWith(docsDir + path.sep)
+      const isCss  = file === path.resolve(docsDir, 'custom.css')
+      const isTmpl = file === (explicitTemplate ?? path.resolve(docsDir, 'template.html'))
+
+      if (isAdoc) rebuildNav()
+      if (isAdoc || isCss || isTmpl) {
         server.ws.send({ type: 'full-reload' })
       }
     },

@@ -1,0 +1,173 @@
+= Theming
+
+adocserver's built-in look can be customised at two levels: **custom CSS** for colour and typography tweaks, and a **custom HTML template** for full layout control.
+
+== Custom CSS
+
+Drop a file named `custom.css` into your docs directory and it is injected automatically after the built-in stylesheet:
+
+[source]
+----
+docs/
+├── index.adoc
+└── custom.css        ← picked up automatically
+----
+
+You can also point to any file via `docserver.config.js`:
+
+[source,javascript]
+----
+// docserver.config.js
+export default {
+  css: '/themes/corporate.css',   // served from docs/public/themes/
+}
+----
+
+=== CSS custom properties
+
+The built-in stylesheet is driven entirely by CSS custom properties on `:root`.
+Override any of them in your `custom.css` to retheme without touching the layout:
+
+[cols="1,1,2"]
+|===
+| Property | Default | Used for
+
+| `--bg`           | `#fff7f6` | Page background
+| `--surface`      | `#ffffff` | Sidebar and content card background
+| `--surface-alt`  | `#fff0ee` | Code blocks, table headers, hover fills
+| `--text`         | `#3f1116` | Body text
+| `--muted`        | `#7c3a3f` | Secondary text, inactive nav links
+| `--border`       | `#e8c7c0` | Dividers and outlines
+| `--accent`       | _(from config)_ | Active nav, links, resize handle
+| `--accent-strong`| _(from config)_ | Hover/active variant of accent
+| `--sidebar-w`    | `220px`   | Initial sidebar width
+|===
+
+==== Example: dark theme
+
+[source,css]
+----
+/* custom.css */
+:root {
+  --bg:          #0f1117;
+  --surface:     #1a1d27;
+  --surface-alt: #22263a;
+  --text:        #e2e8f0;
+  --muted:       #94a3b8;
+  --border:      #2d3148;
+}
+----
+
+==== Example: custom font
+
+[source,css]
+----
+/* custom.css */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+
+body {
+  font-family: 'Inter', sans-serif;
+}
+----
+
+== Custom HTML template
+
+For full layout control — different structure, extra navigation, analytics scripts — create `template.html` in your docs directory:
+
+[source]
+----
+docs/
+├── index.adoc
+└── template.html     ← picked up automatically
+----
+
+Or point to any file via config:
+
+[source,javascript]
+----
+// docserver.config.js
+export default {
+  template: 'themes/my-template.html',
+}
+----
+
+=== Template slots
+
+adocserver fills `{{double-brace}}` placeholders with page content:
+
+[cols="1,3"]
+|===
+| Slot | Contents
+
+| `{{title}}`   | Page title string (e.g. `Installation — My Docs`)
+| `{{head}}`    | Functional `<head>` elements: HMR client, MathJax, highlight.js stylesheet, favicon link
+| `{{sidebar}}` | Rendered sidebar HTML (`<aside>` + resize handle)
+| `{{body}}`    | Converted AsciiDoc content HTML
+| `{{scripts}}` | Body scripts: highlight.js initialisation + sidebar resize handler
+|===
+
+Any unknown placeholder is replaced with an empty string.
+
+=== Minimal example
+
+[source,html]
+----
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>{{title}}</title>
+    {{head}}
+    <link rel="stylesheet" href="/my-styles.css" />
+  </head>
+  <body>
+    {{sidebar}}
+    <main>
+      {{body}}
+    </main>
+    {{scripts}}
+  </body>
+</html>
+----
+
+NOTE: `{{sidebar}}` renders the `id="site-sidebar"` and `id="sidebar-resizer"` elements that `{{scripts}}` expects.
+Place both in your template for the resizable sidebar to work.
+
+=== Full example with layout classes
+
+[source,html]
+----
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>{{title}}</title>
+    {{head}}
+    <link rel="stylesheet" href="/brand.css" />
+  </head>
+  <body class="docs-layout">
+    {{sidebar}}
+    <main class="docs-content">
+      <div class="content-inner">
+        {{body}}
+      </div>
+    </main>
+    {{scripts}}
+  </body>
+</html>
+----
+
+[source,css]
+----
+/* brand.css — served from docs/public/ */
+:root {
+  --accent:        #0f766e;
+  --accent-strong: #0d6561;
+  --bg:            #f0fdf4;
+  --surface:       #ffffff;
+  --surface-alt:   #dcfce7;
+  --text:          #14532d;
+  --muted:         #166534;
+  --border:        #bbf7d0;
+}
+
+body { font-family: 'Georgia', serif; }
+----

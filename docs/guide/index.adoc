@@ -2,3 +2,4 @@
 
 include::navigation.adoc[]
 include::writing.adoc[]
+include::theming.adoc[]

@@ -67,6 +67,55 @@ export default {
 }
 ----
 
+=== `css`
+
+[horizontal]
+Type:: `string` (URL)
+Default:: _(none — auto-detects `custom.css` in your docs directory)_
+
+URL of a stylesheet injected after the built-in styles.
+Place the file in `public/` so Vite serves it, then reference it by its root-relative URL:
+
+[source,javascript]
+----
+export default {
+  css: '/themes/corporate.css',
+}
+----
+
+If a `custom.css` file exists in your docs directory it is picked up automatically without any config entry.
+See xref:../guide/theming.adoc[Theming] for available CSS custom properties.
+
+=== `template`
+
+[horizontal]
+Type:: `string` (path, relative to docs directory)
+Default:: _(none — auto-detects `template.html` in your docs directory)_
+
+Path to a custom HTML template file.
+adocserver fills `{{double-brace}}` placeholders with page content:
+
+[cols="1,3"]
+|===
+| Slot | Contents
+
+| `{{title}}`   | Page title string
+| `{{head}}`    | HMR client, MathJax, highlight.js stylesheet, favicon
+| `{{sidebar}}` | Rendered sidebar HTML
+| `{{body}}`    | Converted AsciiDoc HTML
+| `{{scripts}}` | highlight.js init + sidebar resize script
+|===
+
+[source,javascript]
+----
+export default {
+  template: 'themes/my-template.html',
+}
+----
+
+If a `template.html` file exists in your docs directory it is picked up automatically.
+See xref:../guide/theming.adoc[Theming] for a full walkthrough.
+
 == Full example
 
 [source]
