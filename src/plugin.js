@@ -159,7 +159,7 @@ function renderSidebar(navRoot, defaultLanding, currentPath, toc, siteTitle, log
       ...node.children.map(c => renderNode(c, depth + 1)),
     ].join('\n')
 
-    return `<details class="nav-group"${anyOpen ? ' open' : ''}${nameAttr}>
+    return `<details class="nav-group" open${nameAttr}>
       <summary class="${cls}${anyOpen ? ' active' : ''}">${node.label} <span class="nav-caret">▾</span></summary>
       <div class="nav-children">
         ${children}
