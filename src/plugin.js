@@ -61,12 +61,42 @@ function readIncludes(file) {
 
 function buildNavTree(file, docsDir, labelOverride) {
   const label = labelOverride || readAdocTitle(file, path.basename(file, '.adoc'))
+  const href  = fileToHref(file, docsDir)
   return {
     label,
-    href: fileToHref(file, docsDir),
+    href,
     file,
-    children: readIncludes(file).map(inc => buildNavTree(inc.filePath, docsDir, inc.label)),
+    children: [
+      ...readPageSections(file, href),
+      ...readIncludes(file).map(inc => buildNavTree(inc.filePath, docsDir, inc.label)),
+    ],
   }
+}
+
+function readPageSections(file, baseHref) {
+  const previousLogger = adoc.LoggerManager.getLogger()
+  try {
+    adoc.LoggerManager.setLogger(adoc.NullLogger.create())
+    // Strip include:: directives so we only see THIS file's own sections.
+    const source = readFileSync(file, 'utf8').replace(/^include::[^\n]*$/gm, '')
+    const doc = adoc.load(source, adocOptions(path.dirname(file)))
+    return extractSectionTree(doc, baseHref)
+  } catch {
+    return []
+  } finally {
+    adoc.LoggerManager.setLogger(previousLogger)
+  }
+}
+
+function extractSectionTree(doc, baseHref) {
+  function walk(node) {
+    return (node.getSections?.() ?? []).map(s => ({
+      label: s.getTitle(),
+      href: baseHref + '#' + s.getId(),
+      children: walk(s),
+    }))
+  }
+  return walk(doc)
 }
 
 // ---- Preprocessing (index pages only) ----------------------------------
@@ -93,18 +123,6 @@ async function preprocessIncludes(source, dir, docsDir) {
 
 // ---- Asciidoc rendering ------------------------------------------------
 
-function extractDocSections(doc) {
-  const items = []
-  function walk(node, level) {
-    for (const s of (node.getSections?.() ?? [])) {
-      items.push({ label: s.getTitle(), href: '#' + s.getId(), level })
-      walk(s, level + 1)
-    }
-  }
-  walk(doc, 1)
-  return items
-}
-
 function adocOptions(baseDir) {
   return {
     safe: 'unsafe',
@@ -124,43 +142,40 @@ function adocOptions(baseDir) {
 
 // ---- Sidebar -----------------------------------------------------------
 
-function renderSidebar(navRoot, defaultLanding, currentPath, toc, siteTitle, logo) {
+function renderSidebar(navRoot, currentPath, currentHash, siteTitle, logo) {
+  function pathOf(href) {
+    const i = href.indexOf('#')
+    return i >= 0 ? href.slice(0, i) : href
+  }
+  function hashOf(href) {
+    const i = href.indexOf('#')
+    return i >= 0 ? href.slice(i) : ''
+  }
+
   function isActive(href) {
-    return href.endsWith('/')
-      ? currentPath === href || currentPath === href.slice(0, -1)
-      : currentPath === href
-  }
-
-  function hasActiveChild(node) {
-    return node.children.some(c => isActive(c.href) || hasActiveChild(c))
-  }
-
-  function tocBlock() {
-    if (!toc.length) return ''
-    return '<div class="toc-items">' + toc.map(t =>
-      `<a href="${t.href}" class="nav-sublink toc-item toc-l${t.level}">${t.label}</a>`
-    ).join('') + '</div>'
+    const p = pathOf(href)
+    const h = hashOf(href)
+    const pathMatch = p.endsWith('/')
+      ? currentPath === p || currentPath === p.slice(0, -1)
+      : currentPath === p
+    return pathMatch && h === currentHash
   }
 
   function renderNode(node, depth) {
-    const active  = isActive(node.href)
-    const anyOpen = active || hasActiveChild(node)
+    const active = isActive(node.href)
+    const cls    = depth === 1 ? 'nav-link' : 'nav-sublink'
 
     if (node.children.length === 0) {
-      return `<a href="${node.href}" class="nav-sublink${active ? ' active' : ''}">${node.label}</a>`
-        + (active ? tocBlock() : '')
+      return `<a href="${node.href}" class="${cls}${active ? ' active' : ''}">${node.label}</a>`
     }
 
-    const cls      = depth === 1 ? 'nav-link' : 'nav-sublink'
-    const nameAttr = depth === 1 ? ' name="adocserver-nav"' : ''
-    const children = [
-      `<a href="${node.href}" class="nav-sublink${active ? ' active' : ''}">Overview</a>`,
-      ...(active ? [tocBlock()] : []),
-      ...node.children.map(c => renderNode(c, depth + 1)),
-    ].join('\n')
+    const children = node.children.map(c => renderNode(c, depth + 1)).join('\n')
 
-    return `<details class="nav-group" open${nameAttr}>
-      <summary class="${cls}${anyOpen ? ' active' : ''}">${node.label} <span class="nav-caret">▾</span></summary>
+    return `<details class="nav-group" open>
+      <summary class="${cls}${active ? ' active' : ''}">
+        <a href="${node.href}" class="nav-label">${node.label}</a>
+        <span class="nav-caret">▸</span>
+      </summary>
       <div class="nav-children">
         ${children}
       </div>
@@ -173,7 +188,7 @@ function renderSidebar(navRoot, defaultLanding, currentPath, toc, siteTitle, log
 
   const items = navRoot.children.map(n => renderNode(n, 1)).join('\n')
   return `<aside class="site-sidebar" id="site-sidebar">
-    <a class="site-brand" href="${defaultLanding}">
+    <a class="site-brand" href="/docs/">
       ${brand}
     </a>
     <nav class="site-nav">
@@ -208,7 +223,11 @@ function buildHead() {
 // Included in {{scripts}} for custom templates; placed before </body> in built-in shell.
 function buildScripts() {
   return `<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
-    <script>window.hljs?.highlightAll()</script>
+    <script>
+      document.querySelectorAll('pre code:not([data-highlighted])').forEach(el => {
+        try { window.hljs?.highlightElement(el) } catch {}
+      })
+    </script>
     <script>
       (function () {
         const sidebar = document.getElementById('site-sidebar')
@@ -247,14 +266,106 @@ function buildScripts() {
           document.body.style.cursor = ''
         })
       })()
+
+      ;(function () {
+        const nav = document.querySelector('.site-nav')
+        if (!nav) return
+
+        // Prevent <details> toggle when the user clicks the label part of a
+        // summary — let the document click handler do SPA navigation instead.
+        // We must NOT stopPropagation here, otherwise the document handler
+        // never runs, the link triggers a full page load, and the sidebar
+        // gets re-rendered (losing its scroll position).
+        nav.addEventListener('click', e => {
+          if (e.target.closest('summary .nav-label')) e.preventDefault()
+        })
+
+        function syncNavActive() {
+          const url = window.location.pathname + window.location.hash
+          nav.querySelectorAll('.nav-link.active, .nav-sublink.active').forEach(el => el.classList.remove('active'))
+          nav.querySelectorAll('a[href]').forEach(a => {
+            const href = a.getAttribute('href')
+            if (!href) return
+            let parsed
+            try { parsed = new URL(href, window.location.origin) } catch { return }
+            if (parsed.pathname + parsed.hash === url) {
+              const summary = a.closest('summary')
+              ;(summary ?? a).classList.add('active')
+            }
+          })
+        }
+
+        async function navigate(href, push) {
+          const url = new URL(href, window.location.origin)
+          const samePath = url.pathname === window.location.pathname
+          if (!samePath) {
+            try {
+              const res = await fetch(url.href, { headers: { accept: 'text/html' } })
+              if (!res.ok) { window.location.href = url.href; return }
+              const html = await res.text()
+              const dom = new DOMParser().parseFromString(html, 'text/html')
+              const fresh = dom.getElementById('content-wrap')
+              const here  = document.getElementById('content-wrap')
+              if (!fresh || !here) { window.location.href = url.href; return }
+              here.replaceWith(fresh)
+              if (dom.title) document.title = dom.title
+              // Highlight only the new content, and only blocks that haven't
+              // already been highlighted. Calling hljs.highlightAll() rescans
+              // the entire document on every navigation — slow (hundreds of
+              // ms) and triggers "unescaped HTML" warnings on re-highlights.
+              if (window.hljs) {
+                fresh.querySelectorAll('pre code:not([data-highlighted])').forEach(el => {
+                  try { window.hljs.highlightElement(el) } catch {}
+                })
+              }
+              // Scope MathJax to the new subtree so it doesn't re-typeset the
+              // whole page.
+              window.MathJax?.typesetPromise?.([fresh])
+            } catch { window.location.href = url.href; return }
+          }
+          if (push) history.pushState(null, '', url.href)
+          syncNavActive()
+          if (url.hash) {
+            const target = document.getElementById(decodeURIComponent(url.hash.slice(1)))
+            // Scroll the main content scroller only — never let scrollIntoView
+            // walk up into the sidebar's overflow ancestor.
+            const main = document.querySelector('.site-main')
+            if (target && main) {
+              main.scrollTop = target.offsetTop - main.offsetTop
+            } else {
+              target?.scrollIntoView()
+            }
+          } else if (!samePath) {
+            const main = document.querySelector('.site-main')
+            if (main) main.scrollTop = 0; else window.scrollTo(0, 0)
+          }
+        }
+
+        document.addEventListener('click', e => {
+          if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+          const a = e.target.closest('a[href]')
+          if (!a) return
+          if (a.target && a.target !== '_self') return
+          let url
+          try { url = new URL(a.getAttribute('href'), window.location.origin) } catch { return }
+          if (url.origin !== window.location.origin) return
+          if (!url.pathname.startsWith('/docs')) return
+          e.preventDefault()
+          navigate(url.href, true)
+        })
+
+        window.addEventListener('popstate', () => navigate(window.location.href, false))
+
+        syncNavActive()
+      })()
     </script>`
 }
 
-function renderPage(bodyHtml, title, currentPath, toc, navRoot, defaultLanding, siteConfig, opts = {}) {
+function renderPage(bodyHtml, title, currentPath, currentHash, navRoot, siteConfig, opts = {}) {
   const { customCss, templateContent } = opts
   const { siteTitle, logo, accent, accentStrong } = siteConfig
 
-  const sidebarHtml = renderSidebar(navRoot, defaultLanding, currentPath, toc, siteTitle, logo)
+  const sidebarHtml = renderSidebar(navRoot, currentPath, currentHash, siteTitle, logo)
   const head        = buildHead()
   const scripts     = buildScripts()
 
@@ -353,16 +464,28 @@ function renderPage(bodyHtml, title, currentPath, toc, navRoot, defaultLanding, 
       .nav-link.active { background: var(--accent); color: #fff; }
       .nav-link.active:hover { background: var(--accent-strong); color: #fff; }
 
-      .nav-caret { font-size: .7em; opacity: .6; margin-left: auto; transition: transform .15s; }
-      details.nav-group[open] > summary .nav-caret { transform: rotate(180deg); }
+      .nav-caret { font-size: .7em; opacity: .6; margin-left: auto; transition: transform .15s; flex-shrink: 0; padding: 0 .25rem; }
+      details.nav-group[open] > summary .nav-caret { transform: rotate(90deg); }
 
       summary.nav-link, summary.nav-sublink {
-        list-style: none; cursor: pointer; user-select: none;
+        list-style: none; user-select: none;
+        display: flex; align-items: center; gap: .25rem;
+        padding: 0;
       }
       summary.nav-link::-webkit-details-marker,
       summary.nav-sublink::-webkit-details-marker { display: none; }
       summary.nav-link::marker,
       summary.nav-sublink::marker { content: ''; }
+      summary .nav-label {
+        flex: 1; min-width: 0;
+        padding: .3rem .625rem;
+        border-radius: .25rem;
+        color: inherit; text-decoration: none;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      summary .nav-label:hover { background: var(--surface-alt); color: var(--text); }
+      summary.active .nav-label { background: var(--accent); color: #fff; }
+      summary.active .nav-label:hover { background: var(--accent-strong); color: #fff; }
 
       .nav-sublink {
         display: block;
@@ -382,14 +505,6 @@ function renderPage(bodyHtml, title, currentPath, toc, navRoot, defaultLanding, 
         display: flex; flex-direction: column; gap: .0625rem;
         padding: .125rem 0 .25rem .75rem;
       }
-
-      /* ---- inline TOC under active page ---- */
-      .toc-items { display: flex; flex-direction: column; gap: .0625rem; padding: .125rem 0 .25rem 0; }
-      .toc-item { font-size: .8rem; white-space: normal; line-height: 1.35; }
-      .toc-item.toc-l1 { padding-left: 1rem; }
-      .toc-item.toc-l2 { padding-left: 1.875rem; }
-      .toc-item.toc-l3 { padding-left: 2.75rem; }
-      .toc-item.toc-l4 { padding-left: 3.625rem; }
 
       /* ---- resize handle ---- */
       .sidebar-resizer {
@@ -482,12 +597,29 @@ export function createAdocPlugin({ docsDir, assetsDir, config }) {
 
   const siteConfig = { siteTitle, logo, accent, accentStrong }
   const DOCS_INDEX = path.resolve(docsDir, 'index.adoc')
+  const DEFAULT_TEMPLATE = path.resolve(docsDir, 'template.html')
+  const DEFAULT_CSS = path.resolve(docsDir, 'custom.css')
 
-  let navRoot, defaultLanding
+  let navRoot
 
   function rebuildNav() {
-    navRoot        = buildNavTree(DOCS_INDEX, docsDir)
-    defaultLanding = navRoot.children[0]?.href ?? '/docs/'
+    navRoot = buildNavTree(DOCS_INDEX, docsDir)
+  }
+
+  function classifyWatchedFile(file) {
+    const abs = path.resolve(file)
+    const isAdoc = abs.endsWith('.adoc') && (abs === DOCS_INDEX || abs.startsWith(docsDir + path.sep))
+    const isCss  = abs === (explicitCss ? path.resolve(docsDir, explicitCss) : DEFAULT_CSS)
+    const isTmpl = abs === (explicitTemplate ?? DEFAULT_TEMPLATE)
+    return { isAdoc, isCss, isTmpl }
+  }
+
+  function triggerReload(server, file) {
+    const { isAdoc, isCss, isTmpl } = classifyWatchedFile(file)
+    if (isAdoc) rebuildNav()
+    if (isAdoc || isCss || isTmpl) {
+      server.ws.send({ type: 'full-reload' })
+    }
   }
 
   rebuildNav()
@@ -496,6 +628,11 @@ export function createAdocPlugin({ docsDir, assetsDir, config }) {
     name: 'adocserver',
 
     configureServer(server) {
+      const onFsChange = changed => triggerReload(server, changed)
+      server.watcher.on('add', onFsChange)
+      server.watcher.on('change', onFsChange)
+      server.watcher.on('unlink', onFsChange)
+
       server.middlewares.use(async (req, res, next) => {
         if (!req.url) return next()
         const pathname = new URL(req.url, 'http://localhost').pathname
@@ -523,9 +660,9 @@ export function createAdocPlugin({ docsDir, assetsDir, config }) {
           return
         }
 
-        // Redirect root → first top-level section
-        if (pathname === '/' || pathname === '/docs' || pathname === '/docs/') {
-          res.writeHead(302, { Location: defaultLanding })
+        // Redirect bare root → /docs/
+        if (pathname === '/') {
+          res.writeHead(302, { Location: '/docs/' })
           res.end()
           return
         }
@@ -551,23 +688,11 @@ export function createAdocPlugin({ docsDir, assetsDir, config }) {
             : rawSource
           const doc  = adoc.load(source, adocOptions(path.dirname(filePath)))
           const html = doc.convert()
-          const toc  = extractDocSections(doc)
           const title = (html.match(/<h1[^>]*>([^<]+)<\/h1>/) ?? [])[1] ?? siteTitle
           res.setHeader('Content-Type', 'text/html; charset=utf-8')
-          res.end(renderPage(html, `${title} — ${siteTitle}`, pathname, toc, navRoot, defaultLanding, siteConfig, { customCss, templateContent }))
+          res.end(renderPage(html, `${title} — ${siteTitle}`, pathname, '', navRoot, siteConfig, { customCss, templateContent }))
         } catch { next() }
       })
-    },
-
-    handleHotUpdate({ file, server }) {
-      const isAdoc = file.endsWith('.adoc') && file.startsWith(docsDir + path.sep)
-      const isCss  = file === path.resolve(docsDir, 'custom.css')
-      const isTmpl = file === (explicitTemplate ?? path.resolve(docsDir, 'template.html'))
-
-      if (isAdoc) rebuildNav()
-      if (isAdoc || isCss || isTmpl) {
-        server.ws.send({ type: 'full-reload' })
-      }
     },
   }
 }
