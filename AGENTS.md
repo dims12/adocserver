@@ -19,6 +19,14 @@ Persistent rules for any agent working on this project. Violating any of these i
 5. **The left pane just renders `_nav.json`.**
    The sidebar is a pure rendering of the nav tree — server-side or client-side, it must consume the same tree that `_nav.json` exposes. No alternate code path that builds nav from a different source. If you need to change what's in the sidebar, change the nav tree builder; the renderer stays a dumb function of the tree.
 
+## Nav tree builder invariants
+
+6. **Includes nest under the section they appear in.**
+   When a source file contains `include::` directives interspersed with section headings, the included files must appear as children of the section immediately above them in document order — not appended after all sections. The builder (`buildInterleavedChildren`) processes the file as a single ordered event sequence (section headings + include directives) and uses a level-aware stack to assign each include to its current section parent.
+
+7. **Use `npm version <patch|minor|major>` to bump the version, not manual edits.**
+   This keeps `package.json` and `package-lock.json` in sync automatically.
+
 ## Click handling in the sidebar
 
 - Clicks on a `<summary>`'s label must navigate via SPA, **not** toggle the `<details>`. Use `e.preventDefault()` on the label click — never `e.stopPropagation()` (that bypasses the SPA handler and causes a full page reload, which violates rule #1).
