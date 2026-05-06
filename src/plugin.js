@@ -44,21 +44,6 @@ function readAdocTitle(file, fallback) {
   } catch { return fallback }
 }
 
-function readIncludes(file) {
-  if (!existsSync(file)) return []
-  const source = readFileSync(file, 'utf8')
-  const results = []
-  const re = new RegExp(INCLUDE_RE.source, 'gm')
-  let m
-  while ((m = re.exec(source)) !== null) {
-    const childPath = path.resolve(path.dirname(file), m[1])
-    if (!existsSync(childPath)) continue
-    const label = m[2].trim() || readAdocTitle(childPath, path.basename(m[1], '.adoc'))
-    results.push({ filePath: childPath, label })
-  }
-  return results
-}
-
 function buildNavTree(file, docsDir, labelOverride) {
   const label = labelOverride || readAdocTitle(file, path.basename(file, '.adoc'))
   const href  = fileToHref(file, docsDir)
@@ -66,37 +51,75 @@ function buildNavTree(file, docsDir, labelOverride) {
     label,
     href,
     file,
-    children: [
-      ...readPageSections(file, href),
-      ...readIncludes(file).map(inc => buildNavTree(inc.filePath, docsDir, inc.label)),
-    ],
+    children: buildInterleavedChildren(file, docsDir, href),
   }
 }
 
-function readPageSections(file, baseHref) {
+// Parse the file as an ordered sequence of section headings and include
+// directives so includes are nested under the section they appear in,
+// not appended after all sections.
+function buildInterleavedChildren(file, docsDir, href) {
+  if (!existsSync(file)) return []
+  const source = readFileSync(file, 'utf8')
+  const dir = path.dirname(file)
+
+  // Collect events in document order
+  const events = []
+  for (const line of source.split('\n')) {
+    const secM = line.match(/^(={2,})\s+(.+)$/)
+    if (secM) {
+      events.push({ type: 'section', level: secM[1].length, title: secM[2].trim() })
+      continue
+    }
+    const incM = line.match(/^include::([^{\[\s]+\.adoc)\[([^\]]*)\]\s*$/)
+    if (incM) {
+      const childPath = path.resolve(dir, incM[1])
+      if (!existsSync(childPath)) continue
+      const label = incM[2].trim() || readAdocTitle(childPath, path.basename(incM[1], '.adoc'))
+      events.push({ type: 'include', filePath: childPath, label })
+    }
+  }
+
+  // Get asciidoctor-generated section IDs (strip includes so they're not followed)
+  const sectionIds = new Map()
   const previousLogger = adoc.LoggerManager.getLogger()
   try {
     adoc.LoggerManager.setLogger(adoc.NullLogger.create())
-    // Strip include:: directives so we only see THIS file's own sections.
-    const source = readFileSync(file, 'utf8').replace(/^include::[^\n]*$/gm, '')
-    const doc = adoc.load(source, adocOptions(path.dirname(file)))
-    return extractSectionTree(doc, baseHref)
+    const stripped = source.replace(/^include::[^\n]*$/gm, '')
+    const doc = adoc.load(stripped, adocOptions(dir))
+    function collectIds(node) {
+      for (const s of (node.getSections?.() ?? [])) {
+        sectionIds.set(s.getTitle(), s.getId())
+        collectIds(s)
+      }
+    }
+    collectIds(doc)
   } catch {
-    return []
+    // ignore parse errors
   } finally {
     adoc.LoggerManager.setLogger(previousLogger)
   }
-}
 
-function extractSectionTree(doc, baseHref) {
-  function walk(node) {
-    return (node.getSections?.() ?? []).map(s => ({
-      label: s.getTitle(),
-      href: baseHref + '#' + s.getId(),
-      children: walk(s),
-    }))
+  // Build tree using a level-aware stack so includes nest under their section
+  const roots = []
+  const stack = [] // [{ node, level }]
+
+  for (const event of events) {
+    if (event.type === 'section') {
+      const id = sectionIds.get(event.title)
+      const node = { label: event.title, href: id ? href + '#' + id : href, children: [] }
+      while (stack.length > 0 && stack[stack.length - 1].level >= event.level) stack.pop()
+      if (stack.length === 0) roots.push(node)
+      else stack[stack.length - 1].node.children.push(node)
+      stack.push({ node, level: event.level })
+    } else {
+      const node = buildNavTree(event.filePath, docsDir, event.label)
+      if (stack.length === 0) roots.push(node)
+      else stack[stack.length - 1].node.children.push(node)
+    }
   }
-  return walk(doc)
+
+  return roots
 }
 
 // ---- Preprocessing (index pages only) ----------------------------------
