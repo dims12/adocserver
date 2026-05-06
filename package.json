@@ -28,5 +28,9 @@
     "vite",
     "dev-server"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dims12/adocserver"
+  },
   "license": "MIT"
 }
