@@ -63,12 +63,17 @@ function buildInterleavedChildren(file, docsDir, href) {
   const source = readFileSync(file, 'utf8')
   const dir = path.dirname(file)
 
-  // Collect events in document order
+  // Pass 1: scan raw source for section markers and include directives in
+  // document order. Section titles are read from raw text (with markup),
+  // but only the *level* and *position* matter -- the actual labels and
+  // ids come from pass 2 (asciidoctor's parsed structure), since titles
+  // can contain backticks, xrefs, attribute substitutions, etc. that
+  // raw-text matching can't reconstruct.
   const events = []
   for (const line of source.split('\n')) {
     const secM = line.match(/^(={2,})\s+(.+)$/)
     if (secM) {
-      events.push({ type: 'section', level: secM[1].length, title: secM[2].trim() })
+      events.push({ type: 'section', level: secM[1].length })
       continue
     }
     const incM = line.match(/^include::([^{\[\s]+\.adoc)\[([^\]]*)\]\s*$/)
@@ -84,34 +89,59 @@ function buildInterleavedChildren(file, docsDir, href) {
     }
   }
 
-  // Get asciidoctor-generated section IDs (strip includes so they're not followed)
-  const sectionIds = new Map()
+  // Pass 2: walk asciidoctor's parsed document in document order and
+  // collect (id, label) pairs. Strip includes from the source so the
+  // loaded document only contains *this* file's sections; that keeps the
+  // section list 1-1 with our raw-source section events.
+  const parsedSections = []
   const previousLogger = adoc.LoggerManager.getLogger()
   try {
     adoc.LoggerManager.setLogger(adoc.NullLogger.create())
     const stripped = source.replace(/^include::[^\n]*$/gm, '')
     const doc = adoc.load(stripped, adocOptions(dir))
-    function collectIds(node) {
+    function walk(node) {
       for (const s of (node.getSections?.() ?? [])) {
-        sectionIds.set(s.getTitle(), s.getId())
-        collectIds(s)
+        // getTitle() returns the HTML-substituted title (e.g. with
+        // <code>...</code> for backticks and <a href="..."> for xrefs);
+        // strip tags + decode common entities to get a clean nav label.
+        const html = s.getTitle() ?? ''
+        const label = html
+          .replace(/<[^>]+>/g, '')
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'")
+          .trim()
+        parsedSections.push({ id: s.getId(), label })
+        walk(s)
       }
     }
-    collectIds(doc)
+    walk(doc)
   } catch {
-    // ignore parse errors
+    // ignore parse errors -- sections will fall through to a sensible
+    // fallback below
   } finally {
     adoc.LoggerManager.setLogger(previousLogger)
   }
 
-  // Build tree using a level-aware stack so includes nest under their section
+  // Build tree using a level-aware stack so includes nest under their
+  // section. Pair raw-source section events 1-1 with parsedSections (both
+  // are in document order); if the asciidoctor pass produced nothing
+  // (parse error), fall back to the file basename as the label and emit
+  // an anchorless href so the entry is at least visible.
   const roots = []
   const stack = [] // [{ node, level }]
+  let secIdx = 0
 
   for (const event of events) {
     if (event.type === 'section') {
-      const id = sectionIds.get(event.title)
-      const node = { label: event.title, href: id ? href + '#' + id : href, children: [] }
+      const meta = parsedSections[secIdx++] ?? { id: null, label: '' }
+      const node = {
+        label: meta.label || path.basename(file, '.adoc'),
+        href:  meta.id ? href + '#' + meta.id : href,
+        children: [],
+      }
       while (stack.length > 0 && stack[stack.length - 1].level >= event.level) stack.pop()
       if (stack.length === 0) roots.push(node)
       else stack[stack.length - 1].node.children.push(node)

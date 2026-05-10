@@ -100,6 +100,58 @@ test('buildNavTree: include attributes other than leveloffset (lines=, tag=) are
   assert.ok(!labels.includes('tag=foo'),    `bracket attrs must not become labels`)
 })
 
+test('buildNavTree: section titles with inline markup (backticks, xref) are rendered to plain text and get a working anchor href', () => {
+  // Reproduces the bug seen in manyfold2/docs/libs/ga/index.adoc, where
+  //   === `signature.hpp`  →  xref:signature.adoc[detail]
+  // showed up in the TOC with the literal source text including the xref
+  // markup, AND was not navigable (href had no #anchor) -- because the nav
+  // builder was matching raw source titles against asciidoctor's
+  // HTML-rendered titles, which never matched, so the section id lookup
+  // missed.
+  const root = mkDocsTree({
+    'index.adoc': [
+      '= Top',
+      '',
+      '== Entities',
+      '',
+      '=== `signature.hpp`  ->  xref:signature.adoc[detail]',
+      '',
+      'Body.',
+      '',
+      '=== `multivector.hpp`  ->  xref:multivector.adoc[detail]',
+      '',
+      'Body.',
+    ].join('\n'),
+    'signature.adoc': '= Signature\n\nBody.\n',
+    'multivector.adoc': '= Multivector\n\nBody.\n',
+  })
+
+  const tree = buildNavTree(path.join(root, 'index.adoc'), root)
+
+  // Find the Entities node and inspect its children.
+  const entities = tree.children.find(c => c.label === 'Entities')
+  assert.ok(entities, `expected an "Entities" section, got ${JSON.stringify(tree.children.map(c => c.label))}`)
+  const childLabels = entities.children.map(c => c.label)
+
+  for (const label of childLabels) {
+    assert.doesNotMatch(label, /xref:/,    `nav label must not contain raw "xref:" markup (got: ${JSON.stringify(label)})`)
+    assert.doesNotMatch(label, /\[detail\]/, `nav label must not contain raw "[detail]" markup (got: ${JSON.stringify(label)})`)
+    assert.doesNotMatch(label, /^`|`$/,      `nav label must not contain raw backticks (got: ${JSON.stringify(label)})`)
+  }
+
+  for (const child of entities.children) {
+    assert.match(
+      child.href,
+      /#./,
+      `section nav entry must have a non-empty #anchor (got: ${JSON.stringify(child.href)} for label ${JSON.stringify(child.label)})`,
+    )
+  }
+
+  // And the cleaned labels should preserve the readable text content.
+  assert.ok(childLabels.some(l => l.includes('signature.hpp')), `expected a label mentioning "signature.hpp" (got: ${JSON.stringify(childLabels)})`)
+  assert.ok(childLabels.some(l => l.includes('multivector.hpp')), `expected a label mentioning "multivector.hpp" (got: ${JSON.stringify(childLabels)})`)
+})
+
 test('preprocessIncludes: index page links use the included file title, not bracket attributes', async () => {
   const root = mkDocsTree({
     'lib/index.adoc': '= GA Library\n\nBody.\n',
