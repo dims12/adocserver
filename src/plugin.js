@@ -579,13 +579,23 @@ function renderPage(bodyHtml, title, currentPath, currentHash, navRoot, siteConf
       .nav-link.active { background: var(--accent); color: #fff; }
       .nav-link.active:hover { background: var(--accent-strong); color: #fff; }
 
-      .nav-caret { font-size: .7em; opacity: .6; margin-left: auto; transition: transform .15s; flex-shrink: 0; padding: 0 .25rem; }
+      .nav-caret {
+        font-size: .7em; opacity: .6; margin-left: auto;
+        transition: transform .15s; flex-shrink: 0; padding: 0 .25rem;
+        /* The caret is a UI glyph, not text -- don't let it be selected. */
+        user-select: none;
+      }
       details.nav-group[open] > summary .nav-caret { transform: rotate(90deg); }
 
       summary.nav-link, summary.nav-sublink {
-        list-style: none; user-select: none;
+        list-style: none;
         display: flex; align-items: center; gap: .25rem;
         padding: 0;
+        /* Group labels (rendered inside <summary>) must be text-selectable
+         * just like leaf nav entries. Earlier we set user-select: none on
+         * the whole summary to keep the caret non-selectable, but that
+         * also blocked label selection -- so user-select: none now lives
+         * on .nav-caret only. */
       }
       summary.nav-link::-webkit-details-marker,
       summary.nav-sublink::-webkit-details-marker { display: none; }
