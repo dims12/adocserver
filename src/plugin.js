@@ -69,24 +69,46 @@ function buildInterleavedChildren(file, docsDir, href) {
   // ids come from pass 2 (asciidoctor's parsed structure), since titles
   // can contain backticks, xrefs, attribute substitutions, etc. that
   // raw-text matching can't reconstruct.
+  //
+  // We also track the most recent block-attribute line (e.g. "[discrete]")
+  // so we can skip headings marked discrete -- those render as standalone
+  // headings, not as nav sections, and asciidoctor's section walker
+  // correctly excludes them. If we picked them up here, the 1-to-1
+  // pairing with pass 2 below would misalign and assign the wrong
+  // labels and anchors to every later section.
   const events = []
+  let pendingAttrs = null
   for (const line of source.split('\n')) {
+    if (line.trim() === '') continue
+    const attrM = line.match(/^\[(.*)\]\s*$/)
+    if (attrM) {
+      pendingAttrs = attrM[1]
+      continue
+    }
     const secM = line.match(/^(={2,})\s+(.+)$/)
     if (secM) {
-      events.push({ type: 'section', level: secM[1].length })
+      const isDiscrete = pendingAttrs !== null && /\bdiscrete\b/.test(pendingAttrs)
+      if (!isDiscrete) {
+        events.push({ type: 'section', level: secM[1].length })
+      }
+      pendingAttrs = null
       continue
     }
     const incM = line.match(/^include::([^{\[\s]+\.adoc)\[([^\]]*)\]\s*$/)
     if (incM) {
       const childPath = path.resolve(dir, incM[1])
-      if (!existsSync(childPath)) continue
-      // Brackets in include:: directives carry asciidoctor *attributes*
-      // (leveloffset=+1, lines=1..5, tag=foo, indent=N, ...), NOT a label
-      // override. The nav label must come from the included file's
-      // "= Title" heading, never from bracket content.
-      const label = readAdocTitle(childPath, path.basename(incM[1], '.adoc'))
-      events.push({ type: 'include', filePath: childPath, label })
+      if (existsSync(childPath)) {
+        // Brackets in include:: directives carry asciidoctor *attributes*
+        // (leveloffset=+1, lines=1..5, tag=foo, indent=N, ...), NOT a
+        // label override. The nav label must come from the included
+        // file's "= Title" heading, never from bracket content.
+        const label = readAdocTitle(childPath, path.basename(incM[1], '.adoc'))
+        events.push({ type: 'include', filePath: childPath, label })
+      }
+      pendingAttrs = null
+      continue
     }
+    pendingAttrs = null
   }
 
   // Pass 2: walk asciidoctor's parsed document in document order and
