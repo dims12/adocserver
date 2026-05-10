@@ -1,0 +1,12 @@
+= Orphan Page
+
+This page is intentionally not included anywhere in the navigation tree.
+It exists solely to reproduce the sidebar-scroll-reset bug:
+
+. Open `/docs/reference/config.html`.
+. Scroll the left sidebar all the way down.
+. Click the "Orphan page" link at the bottom of the page.
+. Observe whether the sidebar scroll position is preserved across the SPA swap.
+
+Since this file is not referenced by any `include::` directive, it does not
+appear in `_nav.json` and therefore has no corresponding entry in the sidebar.

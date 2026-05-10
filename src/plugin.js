@@ -6,7 +6,7 @@ import path from 'node:path'
 const adoc = asciidoctor()
 
 // Matches local include:: directives (relative path, no attribute references).
-const INCLUDE_RE = /^include::([^{\[\s]+\.adoc)\[([^\]]*)\]\s*$/gm
+const INCLUDE_RE = /^include::([^{\[\s]+\.adoc)\[([^\]]*)\][ \t]*$/gm
 
 function applyTemplate(tmpl, slots) {
   return tmpl.replace(/\{\{(\w+)\}\}/g, (_, k) => slots[k] ?? '')
@@ -30,7 +30,7 @@ function hrefToFile(pathname, docsDir) {
   } else {
     rel = rel.replace(/^\//, '')
     if (rel.endsWith('/')) rel += 'index.adoc'
-    else if (!rel.endsWith('.adoc')) rel += '.adoc'
+    else if (!rel.endsWith('.adoc')) rel = rel.replace(/\.html$/, '') + '.adoc'
   }
   const filePath = path.resolve(docsDir, rel)
   if (!filePath.startsWith(docsDir + path.sep)) return null
@@ -139,7 +139,7 @@ async function preprocessIncludes(source, dir, docsDir) {
         label = t ? t[1].trim() : path.basename(m[1], '.adoc')
       } catch { label = path.basename(m[1], '.adoc') }
     }
-    result = result.replace(m[0], `link:${fileToHref(filePath, docsDir)}[${label}]`)
+    result = result.replace(m[0], `* link:${fileToHref(filePath, docsDir)}[${label}]`)
   }
   return result
 }
@@ -197,7 +197,7 @@ function renderSidebar(navRoot, currentPath, currentHash, siteTitle, logo) {
     return `<details class="nav-group" open>
       <summary class="${cls}${active ? ' active' : ''}">
         <a href="${node.href}" class="nav-label">${node.label}</a>
-        <span class="nav-caret">‚ñ∏</span>
+        <span class="nav-caret">?</span>
       </summary>
       <div class="nav-children">
         ${children}
@@ -293,9 +293,10 @@ function buildScripts() {
       ;(function () {
         const nav = document.querySelector('.site-nav')
         if (!nav) return
+        const sidebar = document.getElementById('site-sidebar')
 
         // Prevent <details> toggle when the user clicks the label part of a
-        // summary ‚Äî let the document click handler do SPA navigation instead.
+        // summary ù let the document click handler do SPA navigation instead.
         // We must NOT stopPropagation here, otherwise the document handler
         // never runs, the link triggers a full page load, and the sidebar
         // gets re-rendered (losing its scroll position).
@@ -318,9 +319,33 @@ function buildScripts() {
           })
         }
 
+        // Frame-like isolation: lock the sidebar's scrollTop for a short
+        // window across the SPA swap. The browser may try to move focus or
+        // scroll the nearest overflow ancestor when the active <a> in the
+        // content is removed; this loop overrides any such adjustment.
+        function lockSidebarScroll(durationMs) {
+          if (!sidebar) return
+          const y = sidebar.scrollTop
+          const deadline = performance.now() + durationMs
+          const tick = () => {
+            if (sidebar.scrollTop !== y) sidebar.scrollTop = y
+            if (performance.now() < deadline) requestAnimationFrame(tick)
+          }
+          sidebar.scrollTop = y
+          requestAnimationFrame(tick)
+        }
+
+        // Track the pathname currently rendered in #content-wrap. We can't
+        // use window.location.pathname for this comparison because on
+        // popstate (Back/Forward) the browser has *already* updated
+        // window.location to the popped URL by the time our handler fires ù
+        // so any check against window.location.pathname would falsely
+        // report "same path" and skip the fetch+swap.
+        let displayedPath = window.location.pathname
+
         async function navigate(href, push) {
           const url = new URL(href, window.location.origin)
-          const samePath = url.pathname === window.location.pathname
+          const samePath = url.pathname === displayedPath
           if (!samePath) {
             try {
               const res = await fetch(url.href, { headers: { accept: 'text/html' } })
@@ -330,11 +355,13 @@ function buildScripts() {
               const fresh = dom.getElementById('content-wrap')
               const here  = document.getElementById('content-wrap')
               if (!fresh || !here) { window.location.href = url.href; return }
+              lockSidebarScroll(500)
               here.replaceWith(fresh)
+              displayedPath = url.pathname
               if (dom.title) document.title = dom.title
               // Highlight only the new content, and only blocks that haven't
               // already been highlighted. Calling hljs.highlightAll() rescans
-              // the entire document on every navigation ‚Äî slow (hundreds of
+              // the entire document on every navigation ù slow (hundreds of
               // ms) and triggers "unescaped HTML" warnings on re-highlights.
               if (window.hljs) {
                 fresh.querySelectorAll('pre code:not([data-highlighted])').forEach(el => {
@@ -350,7 +377,7 @@ function buildScripts() {
           syncNavActive()
           if (url.hash) {
             const target = document.getElementById(decodeURIComponent(url.hash.slice(1)))
-            // Scroll the main content scroller only ‚Äî never let scrollIntoView
+            // Scroll the main content scroller only ù never let scrollIntoView
             // walk up into the sidebar's overflow ancestor.
             const main = document.querySelector('.site-main')
             if (target && main) {
@@ -358,19 +385,44 @@ function buildScripts() {
             } else {
               target?.scrollIntoView()
             }
-          } else if (!samePath) {
+          } else {
+            // No hash: scroll main to top. This must run for both new-path
+            // navigations AND same-path navigations -- e.g. user is on
+            // /docs/quickstart#_installation and clicks the parent
+            // "Quick Start" nav label (href=/docs/quickstart, no hash).
+            // The path is unchanged but the target is the top of the page.
             const main = document.querySelector('.site-main')
             if (main) main.scrollTop = 0; else window.scrollTo(0, 0)
           }
         }
+
+        // Prevent in-content links from grabbing focus on click. mousedown's
+        // default action is to focus the target; once the link is focused,
+        // removing it later (during SPA swap) makes the browser move focus
+        // to the first tab stop in the document ù the sidebar ù and scroll
+        // the sidebar to show it. Suppressing the focus shift up front
+        // means the sidebar never has a reason to scroll.
+        document.addEventListener('mousedown', e => {
+          if (e.button !== 0) return
+          const a = e.target.closest('a[href]')
+          if (!a) return
+          if (!a.closest('.site-main')) return
+          e.preventDefault()
+        })
 
         document.addEventListener('click', e => {
           if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
           const a = e.target.closest('a[href]')
           if (!a) return
           if (a.target && a.target !== '_self') return
+          // Use the DOM's already-resolved absolute URL (a.href). Resolving the
+          // raw attribute against window.location.origin would drop the
+          // document path, so a relative href like "../orphan.html" from
+          // /docs/reference/config.html would wrongly resolve to /orphan.html
+          // and miss the /docs prefix check below ù bypassing SPA entirely
+          // and causing a full page reload (which re-renders the sidebar).
           let url
-          try { url = new URL(a.getAttribute('href'), window.location.origin) } catch { return }
+          try { url = new URL(a.href) } catch { return }
           if (url.origin !== window.location.origin) return
           if (!url.pathname.startsWith('/docs')) return
           e.preventDefault()
@@ -651,6 +703,7 @@ export function createAdocPlugin({ docsDir, assetsDir, config }) {
     name: 'adocserver',
 
     configureServer(server) {
+      server.watcher.add(path.join(docsDir, '**/*.adoc'))
       const onFsChange = changed => triggerReload(server, changed)
       server.watcher.on('add', onFsChange)
       server.watcher.on('change', onFsChange)
@@ -683,7 +736,7 @@ export function createAdocPlugin({ docsDir, assetsDir, config }) {
           return
         }
 
-        // Redirect bare root ‚Üí /docs/
+        // Redirect bare root ? /docs/
         if (pathname === '/') {
           res.writeHead(302, { Location: '/docs/' })
           res.end()
@@ -713,7 +766,7 @@ export function createAdocPlugin({ docsDir, assetsDir, config }) {
           const html = doc.convert()
           const title = (html.match(/<h1[^>]*>([^<]+)<\/h1>/) ?? [])[1] ?? siteTitle
           res.setHeader('Content-Type', 'text/html; charset=utf-8')
-          res.end(renderPage(html, `${title} ‚Äî ${siteTitle}`, pathname, '', navRoot, siteConfig, { customCss, templateContent }))
+          res.end(renderPage(html, `${title} ù ${siteTitle}`, pathname, '', navRoot, siteConfig, { customCss, templateContent }))
         } catch { next() }
       })
     },

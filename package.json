@@ -12,7 +12,8 @@
     "assets"
   ],
   "scripts": {
-    "start": "node bin/adocserver.js"
+    "start": "node bin/adocserver.js",
+    "test": "playwright test"
   },
   "dependencies": {
     "asciidoctor": "^3.0.4",
@@ -32,5 +33,8 @@
     "type": "git",
     "url": "https://github.com/dims12/adocserver"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@playwright/test": "^1.59.1"
+  }
 }

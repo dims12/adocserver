@@ -93,6 +93,7 @@ const server = await createServer({
     port,
     host,
     open: open ? '/docs/' : false,
+    allowedHosts: true,
   },
   plugins: [
     createAdocPlugin({ docsDir, assetsDir, config }),

@@ -143,3 +143,8 @@ export default {
   logo: '/logo.svg',
 }
 ----
+
+== See also
+
+xref:../orphan.adoc[Orphan page] — repro link for the sidebar-scroll bug.
+This target is not in the nav tree.

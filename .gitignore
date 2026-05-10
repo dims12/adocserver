@@ -1,3 +1,6 @@
 node_modules/
 docs/*.pdf
 docs/images/stem-*.svg
+playwright-report/
+test-results/
+.playwright/
