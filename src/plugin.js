@@ -201,6 +201,37 @@ export async function preprocessIncludes(source, dir, docsDir) {
   return result
 }
 
+// ---- WebAssembly macro preprocessing ----------------------------------
+
+const WASM_RE = /^wasm::([^\s\[]+)\[([^\]]*)\]\s*$/gm
+
+function parseBlockAttrs(str) {
+  const attrs = {}
+  let pos = 1
+  for (const part of str.split(',')) {
+    const t = part.trim()
+    if (!t) continue
+    const kv = t.match(/^(\w[\w-]*)\s*=\s*(.+)$/)
+    if (kv) {
+      attrs[kv[1]] = kv[2].trim()
+    } else {
+      attrs[pos++] = t
+    }
+  }
+  return attrs
+}
+
+export function preprocessWasm(source) {
+  return source.replace(new RegExp(WASM_RE.source, 'gm'), (_, target, attrStr) => {
+    const attrs = parseBlockAttrs(attrStr)
+    const w = attrs.width || attrs[1] || 800
+    const h = attrs.height || attrs[2] || 600
+    const src = /^\//.test(target) ? target : `/wasm/${target}`
+    const url = `/_adocserver/wasm-shell?src=${encodeURIComponent(src)}&w=${w}&h=${h}`
+    return `++++\n<div class="wasm-embed"><iframe src="${url}" width="${w}" height="${h}" frameborder="0" scrolling="no" style="display:block;border:0"></iframe></div>\n++++`
+  })
+}
+
 // ---- Asciidoc rendering ------------------------------------------------
 
 function adocOptions(baseDir) {
@@ -353,7 +384,7 @@ function buildScripts() {
         const sidebar = document.getElementById('site-sidebar')
 
         // Prevent <details> toggle when the user clicks the label part of a
-        // summary ù let the document click handler do SPA navigation instead.
+        // summary ÔøΩ let the document click handler do SPA navigation instead.
         // We must NOT stopPropagation here, otherwise the document handler
         // never runs, the link triggers a full page load, and the sidebar
         // gets re-rendered (losing its scroll position).
@@ -395,7 +426,7 @@ function buildScripts() {
         // Track the pathname currently rendered in #content-wrap. We can't
         // use window.location.pathname for this comparison because on
         // popstate (Back/Forward) the browser has *already* updated
-        // window.location to the popped URL by the time our handler fires ù
+        // window.location to the popped URL by the time our handler fires ÔøΩ
         // so any check against window.location.pathname would falsely
         // report "same path" and skip the fetch+swap.
         let displayedPath = window.location.pathname
@@ -423,7 +454,7 @@ function buildScripts() {
               if (dom.title) document.title = dom.title
               // Highlight only the new content, and only blocks that haven't
               // already been highlighted. Calling hljs.highlightAll() rescans
-              // the entire document on every navigation ù slow (hundreds of
+              // the entire document on every navigation ÔøΩ slow (hundreds of
               // ms) and triggers "unescaped HTML" warnings on re-highlights.
               if (window.hljs) {
                 fresh.querySelectorAll('pre code:not([data-highlighted])').forEach(el => {
@@ -439,7 +470,7 @@ function buildScripts() {
           syncNavActive()
           if (url.hash) {
             const target = document.getElementById(decodeURIComponent(url.hash.slice(1)))
-            // Scroll the main content scroller only ù never let scrollIntoView
+            // Scroll the main content scroller only ÔøΩ never let scrollIntoView
             // walk up into the sidebar's overflow ancestor.
             const main = document.querySelector('.site-main')
             if (target && main) {
@@ -461,7 +492,7 @@ function buildScripts() {
         // Prevent in-content links from grabbing focus on click. mousedown's
         // default action is to focus the target; once the link is focused,
         // removing it later (during SPA swap) makes the browser move focus
-        // to the first tab stop in the document ù the sidebar ù and scroll
+        // to the first tab stop in the document ÔøΩ the sidebar ÔøΩ and scroll
         // the sidebar to show it. Suppressing the focus shift up front
         // means the sidebar never has a reason to scroll.
         document.addEventListener('mousedown', e => {
@@ -481,7 +512,7 @@ function buildScripts() {
           // raw attribute against window.location.origin would drop the
           // document path, so a relative href like "../orphan.html" from
           // /docs/reference/config.html would wrongly resolve to /orphan.html
-          // and miss the /docs prefix check below ù bypassing SPA entirely
+          // and miss the /docs prefix check below ÔøΩ bypassing SPA entirely
           // and causing a full page reload (which re-renders the sidebar).
           let url
           try { url = new URL(a.href) } catch { return }
@@ -785,6 +816,38 @@ export function createAdocPlugin({ docsDir, assetsDir, config }) {
         if (!req.url) return next()
         const pathname = new URL(req.url, 'http://localhost').pathname
 
+        // WebAssembly iframe shell
+        if (pathname === '/_adocserver/wasm-shell') {
+          const params = new URL(req.url, 'http://localhost').searchParams
+          const src    = params.get('src') || ''
+          const w      = parseInt(params.get('w') || '800', 10)
+          const h      = parseInt(params.get('h') || '600', 10)
+          if (!src.startsWith('/wasm/') || !src.endsWith('.js') || src.includes('..')) {
+            res.statusCode = 400
+            res.setHeader('Content-Type', 'text/plain')
+            res.end('Invalid src')
+            return
+          }
+          res.setHeader('Content-Type', 'text/html; charset=utf-8')
+          res.end(`<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+* { margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+canvas#canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex=-1></canvas>
+<script>var Module = { canvas: document.getElementById('canvas') };</script>
+<script src="${src}"></script>
+</body>
+</html>`)
+          return
+        }
+
         // Bundled package assets (favicon, etc.)
         if (pathname.startsWith('/_adocserver/')) {
           const rel      = pathname.slice('/_adocserver/'.length)
@@ -857,14 +920,16 @@ export function createAdocPlugin({ docsDir, assetsDir, config }) {
           }
 
           const rawSource = await fs.readFile(filePath, 'utf8')
-          const source    = path.basename(filePath) === 'index.adoc'
-            ? await preprocessIncludes(rawSource, path.dirname(filePath), docsDir)
-            : rawSource
+          const source    = preprocessWasm(
+            path.basename(filePath) === 'index.adoc'
+              ? await preprocessIncludes(rawSource, path.dirname(filePath), docsDir)
+              : rawSource
+          )
           const doc  = adoc.load(source, adocOptions(path.dirname(filePath)))
           const html = doc.convert()
           const title = (html.match(/<h1[^>]*>([^<]+)<\/h1>/) ?? [])[1] ?? siteTitle
           res.setHeader('Content-Type', 'text/html; charset=utf-8')
-          res.end(renderPage(html, `${title} ù ${siteTitle}`, pathname, '', navRoot, siteConfig, { customCss, templateContent }))
+          res.end(renderPage(html, `${title} ÔøΩ ${siteTitle}`, pathname, '', navRoot, siteConfig, { customCss, templateContent }))
         } catch { next() }
       })
     },

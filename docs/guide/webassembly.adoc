@@ -1,0 +1,103 @@
+= WebAssembly Embeds
+
+adocserver can embed interactive WebAssembly applications directly in your documentation
+using the `wasm::` block macro.
+Each embed runs in an isolated `<iframe>` so multiple demos can coexist on a page
+without canvas or event-loop conflicts.
+
+== Directory layout
+
+Place your Emscripten output in a `wasm/` subdirectory of your docs root:
+
+[source]
+----
+docs/
+├── index.adoc
+└── wasm/
+    ├── demo.js     <1>
+    └── demo.wasm   <2>
+----
+<1> Emscripten-generated JavaScript glue script.
+<2> WebAssembly binary — Emscripten places it next to the `.js` automatically.
+
+Both files are served by the development server automatically — no extra configuration required.
+
+== Embedding a module
+
+Use the `wasm::` block macro with the `.js` glue filename as the target.
+The first two positional attributes set the width and height in pixels.
+
+[source,asciidoc]
+----
+wasm::demo.js[800,600]
+----
+
+Named attributes work equally well:
+
+[source,asciidoc]
+----
+wasm::demo.js[width=800,height=600]
+----
+
+Width and height default to `800` × `600` when omitted.
+
+adocserver generates an `<iframe>` pointing to an internal HTML shell that
+contains a `<canvas>` and loads your glue script inside it.
+
+== Compiling a raylib application
+
+Compile with https://emscripten.org[Emscripten], targeting the two-file output format (`.js` + `.wasm`):
+
+[source,bash]
+----
+emcc game.c           \
+  -o docs/wasm/game.js \
+  -lraylib            \
+  -s USE_GLFW=3       \
+  -s ASYNCIFY         \
+  -O2
+----
+
+[IMPORTANT]
+====
+Output to `docs/wasm/game.js`.
+Emscripten places `game.wasm` alongside it automatically.
+Do not output to `.html` — adocserver only serves the `.js` + `.wasm` pair.
+====
+
+Then embed in any page:
+
+[source,asciidoc]
+----
+wasm::game.js[960,540]
+----
+
+== Live example
+
+The embed below runs a rainbow-coloured 3D cube grid with sine-wave animation.
+*Left-drag* to orbit, *scroll wheel* to zoom.
+
+wasm::waving_cubes.js[800,450]
+
+The `.js` and `.wasm` files live under `docs/wasm/` and are served as static assets.
+The source is based on the official raylib
+https://github.com/raysan5/raylib/blob/master/examples/models/models_waving_cubes.c[models_waving_cubes]
+example with an interactive orbit camera added.
+
+== How it works
+
+When adocserver encounters a `wasm::` macro it rewrites it to a passthrough block
+containing an `<iframe>` whose `src` points to an internal route.
+That route serves a minimal HTML shell:
+
+[source,html]
+----
+<canvas id="canvas" ...></canvas>
+<script>var Module = { canvas: document.getElementById('canvas') };</script>
+<script src="/wasm/game.js"></script>
+----
+
+Setting `Module.canvas` before the glue script loads tells Emscripten which canvas
+to use, so your application works regardless of the `-s CANVAS_ELEMENT_ID` compile flag.
+The `<iframe>` isolates each embed's WebGL context and event loop so any number of
+demos can appear on the same page.
