@@ -164,4 +164,54 @@ test.describe('sidebar scroll preservation across SPA navigation', () => {
       { message: 'main should scroll to top when navigating to a no-hash URL on the current page' }
     ).toBe(0)
   })
+
+  test('a missing /docs page is served as a shell-wrapped 404, sidebar preserved', async ({ page }) => {
+    // The server should render a 404 page that still contains #content-wrap
+    // and the sidebar, so the SPA can swap it in like any other page.
+    const response = await page.goto('/docs/this/path/does/not/exist')
+    expect(response?.status()).toBe(404)
+    await expect(page.locator('#content-wrap h1')).toContainText('Page not found')
+    await expect(page.locator('#site-sidebar')).toBeVisible()
+    // The "documentation home" recovery link should be present.
+    await expect(page.locator('#content-wrap a[href="/docs/"]')).toBeVisible()
+  })
+
+  test('clicking a broken in-content xref swaps a 404 page via SPA, sidebar identity preserved', async ({ page }) => {
+    // Repro for the broken-link UX bug (cf. manyfold2 glossary's xref:api/...
+    // typos that resolve to non-existent /docs/api/... URLs):
+    //   - Before the fix: SPA fetch returned a non-OK status and the client
+    //     fell back to window.location.href = url, causing a full page
+    //     reload that re-rendered the sidebar (AGENTS.md invariant #1).
+    //   - After the fix: server returns a shell-wrapped 404 with
+    //     #content-wrap, SPA swaps it in, sidebar stays put.
+    await page.goto('/docs/orphan.html')
+
+    await page.locator('#site-sidebar').evaluate(el => {
+      el.setAttribute('data-test-tag', 'original')
+    })
+
+    const brokenLink = page.locator('#content-wrap a', { hasText: 'broken cross-reference' })
+    await expect(brokenLink).toBeVisible()
+    await brokenLink.click()
+
+    await expect(page).toHaveURL(/\/docs\/does-not-exist(\.html)?$/)
+    await expect(page.locator('#content-wrap h1')).toContainText('Page not found')
+
+    // Sidebar must be the same DOM element it was before (not re-rendered).
+    const tag = await page.locator('#site-sidebar').getAttribute('data-test-tag')
+    expect(tag).toBe('original')
+  })
+
+  test('static assets under /docs are still served by Vite (404 page must not shadow them)', async ({ page }) => {
+    // Defensive test: the missing-page handler must only fire for doc-shaped
+    // requests (no extension, .html, or .adoc) -- a request like
+    // /docs/some-image.png must fall through to Vite's static server, not
+    // get intercepted as a missing doc.
+    const response = await page.request.get('/docs/never-going-to-exist.png')
+    // We don't care what status Vite returns (likely 404), only that the
+    // body is NOT our HTML 404 shell.
+    const body = await response.text()
+    expect(body).not.toContain('<h1>Page not found</h1>')
+    expect(body).not.toContain('site-sidebar')
+  })
 })

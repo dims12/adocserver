@@ -44,7 +44,7 @@ function readAdocTitle(file, fallback) {
   } catch { return fallback }
 }
 
-function buildNavTree(file, docsDir, labelOverride) {
+export function buildNavTree(file, docsDir, labelOverride) {
   const label = labelOverride || readAdocTitle(file, path.basename(file, '.adoc'))
   const href  = fileToHref(file, docsDir)
   return {
@@ -75,7 +75,11 @@ function buildInterleavedChildren(file, docsDir, href) {
     if (incM) {
       const childPath = path.resolve(dir, incM[1])
       if (!existsSync(childPath)) continue
-      const label = incM[2].trim() || readAdocTitle(childPath, path.basename(incM[1], '.adoc'))
+      // Brackets in include:: directives carry asciidoctor *attributes*
+      // (leveloffset=+1, lines=1..5, tag=foo, indent=N, ...), NOT a label
+      // override. The nav label must come from the included file's
+      // "= Title" heading, never from bracket content.
+      const label = readAdocTitle(childPath, path.basename(incM[1], '.adoc'))
       events.push({ type: 'include', filePath: childPath, label })
     }
   }
@@ -124,7 +128,7 @@ function buildInterleavedChildren(file, docsDir, href) {
 
 // ---- Preprocessing (index pages only) ----------------------------------
 
-async function preprocessIncludes(source, dir, docsDir) {
+export async function preprocessIncludes(source, dir, docsDir) {
   const re = new RegExp(INCLUDE_RE.source, 'gm')
   const matches = [...source.matchAll(re)]
   if (matches.length === 0) return source
@@ -132,13 +136,14 @@ async function preprocessIncludes(source, dir, docsDir) {
   for (const m of matches) {
     const filePath = path.resolve(dir, m[1])
     if (!existsSync(filePath)) continue
-    let label = m[2].trim()
-    if (!label) {
-      try {
-        const t = (await fs.readFile(filePath, 'utf8')).match(/^= (.+)$/m)
-        label = t ? t[1].trim() : path.basename(m[1], '.adoc')
-      } catch { label = path.basename(m[1], '.adoc') }
-    }
+    // Bracket content is asciidoctor include attributes (leveloffset=+1,
+    // lines=1..5, tag=foo, ...), not a label. Always derive the label from
+    // the included file's "= Title" heading.
+    let label
+    try {
+      const t = (await fs.readFile(filePath, 'utf8')).match(/^= (.+)$/m)
+      label = t ? t[1].trim() : path.basename(m[1], '.adoc')
+    } catch { label = path.basename(m[1], '.adoc') }
     result = result.replace(m[0], `* link:${fileToHref(filePath, docsDir)}[${label}]`)
   }
   return result
@@ -349,7 +354,12 @@ function buildScripts() {
           if (!samePath) {
             try {
               const res = await fetch(url.href, { headers: { accept: 'text/html' } })
-              if (!res.ok) { window.location.href = url.href; return }
+              // Don't bail on non-OK status here: the server intentionally
+              // serves a shell-wrapped 404 page (with a usable #content-wrap)
+              // for missing /docs paths, and we want the SPA to swap it in
+              // so the sidebar/scroll state is preserved. The fall-through
+              // to a full page nav still happens below if the response has
+              // no #content-wrap to swap.
               const html = await res.text()
               const dom = new DOMParser().parseFromString(html, 'text/html')
               const fresh = dom.getElementById('content-wrap')
@@ -745,8 +755,14 @@ export function createAdocPlugin({ docsDir, assetsDir, config }) {
 
         if (!pathname.startsWith('/docs')) return next()
 
-        const filePath = hrefToFile(pathname, docsDir)
-        if (!filePath) return next()
+        // A request is doc-shaped if it has no explicit non-.html extension
+        // -- i.e. /docs, /docs/, /docs/foo, /docs/foo/, /docs/foo.html.
+        // Anything else (e.g. /docs/images/foo.png, /docs/custom.css) is a
+        // static asset and must be deferred to Vite. Without this guard the
+        // missing-page 404 below would shadow every static asset under /docs.
+        const ext = path.extname(pathname)
+        const isDocShaped = ext === '' || ext === '.html' || ext === '.adoc'
+        if (!isDocShaped) return next()
 
         try {
           // Resolve custom CSS: explicit config wins, then auto-detect custom.css
@@ -757,6 +773,26 @@ export function createAdocPlugin({ docsDir, assetsDir, config }) {
           const templateFile = explicitTemplate
             ?? (existsSync(path.resolve(docsDir, 'template.html')) ? path.resolve(docsDir, 'template.html') : null)
           const templateContent = templateFile ? await fs.readFile(templateFile, 'utf8') : null
+
+          const filePath = hrefToFile(pathname, docsDir)
+          if (!filePath) {
+            // Render a shell-wrapped 404 so the SPA can swap it in (sidebar
+            // stays put, scroll position preserved). Without this, the SPA
+            // fetch would 404 from Vite's static server with no usable
+            // #content-wrap and the client would fall back to a full page
+            // navigation -- defeating the SPA model for broken/typo links.
+            const escapedPath = pathname
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;')
+            const html = `<h1>Page not found</h1>
+<p>No document is registered at <code>${escapedPath}</code>.</p>
+<p>The link you followed may contain a typo, or the target file may have been moved or removed. Use the navigation on the left to find what you were looking for, or return to the <a href="/docs/">documentation home</a>.</p>`
+            res.statusCode = 404
+            res.setHeader('Content-Type', 'text/html; charset=utf-8')
+            res.end(renderPage(html, `Page not found - ${siteTitle}`, pathname, '', navRoot, siteConfig, { customCss, templateContent }))
+            return
+          }
 
           const rawSource = await fs.readFile(filePath, 'utf8')
           const source    = path.basename(filePath) === 'index.adoc'
