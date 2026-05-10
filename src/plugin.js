@@ -20,7 +20,7 @@ function fileToHref(file, docsDir) {
     const dir = path.dirname(rel)
     return dir === '.' ? '/docs/' : `/docs/${dir}/`
   }
-  return '/docs/' + rel.slice(0, -5)
+  return '/docs/' + rel
 }
 
 function hrefToFile(pathname, docsDir) {
@@ -227,8 +227,8 @@ export function preprocessWasm(source) {
     const w = attrs.width || attrs[1] || 800
     const h = attrs.height || attrs[2] || 600
     const src = /^\//.test(target) ? target : `/wasm/${target}`
-    const url = `/_adocserver/wasm-shell?src=${encodeURIComponent(src)}&w=${w}&h=${h}`
-    return `++++\n<div class="wasm-embed"><iframe src="${url}" width="${w}" height="${h}" frameborder="0" scrolling="no" style="display:block;border:0"></iframe></div>\n++++`
+    const url = `/_adocserver/wasm-shell?src=${encodeURIComponent(src)}&w=${encodeURIComponent(w)}&h=${encodeURIComponent(h)}`
+    return `++++\n<div class="wasm-embed"><iframe src="${url}" width="${w}" height="${h}" frameborder="0" scrolling="no" allow="autoplay; fullscreen; gamepad; clipboard-read; clipboard-write" style="display:block;border:0"></iframe></div>\n++++`
   })
 }
 
@@ -820,29 +820,53 @@ export function createAdocPlugin({ docsDir, assetsDir, config }) {
         if (pathname === '/_adocserver/wasm-shell') {
           const params = new URL(req.url, 'http://localhost').searchParams
           const src    = params.get('src') || ''
-          const w      = parseInt(params.get('w') || '800', 10)
-          const h      = parseInt(params.get('h') || '600', 10)
+          const w      = Math.max(1, Math.min(8192, parseInt(params.get('w') || '800', 10) || 800))
+          const h      = Math.max(1, Math.min(8192, parseInt(params.get('h') || '600', 10) || 600))
           if (!src.startsWith('/wasm/') || !src.endsWith('.js') || src.includes('..')) {
             res.statusCode = 400
             res.setHeader('Content-Type', 'text/plain')
             res.end('Invalid src')
             return
           }
+          // Emscripten resolves .wasm / .data next to the *document* URL. This page
+          // lives at /_adocserver/wasm-shell, so without locateFile the runtime
+          // wrongly fetches /_adocserver/*.wasm ? prefix with the real /wasm/ dir.
+          const slash       = src.lastIndexOf('/')
+          const assetBase   = slash >= 0 ? src.slice(0, slash + 1) : '/wasm/'
+          const assetBaseJs = JSON.stringify(assetBase)
           res.setHeader('Content-Type', 'text/html; charset=utf-8')
+          // Pin the shell document to the embed?s pixel size so window.innerWidth/Height
+          // are non-zero before raylib/GLFW run (iframes can report 0 during first layout).
           res.end(`<!doctype html>
-<html>
+<html lang="en" style="margin:0;width:${w}px;height:${h}px;overflow:hidden;box-sizing:border-box;background:#000;">
 <head>
 <meta charset="utf-8">
 <style>
-* { margin: 0; padding: 0; }
-html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
-canvas#canvas { display: block; }
+* { box-sizing: border-box; }
+html, body { margin: 0; overflow: hidden; background: #000; }
+body { width: ${w}px; height: ${h}px; }
+canvas#canvas { display: block; width: 100%; height: 100%; }
 </style>
 </head>
 <body>
-<canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex=-1></canvas>
-<script>var Module = { canvas: document.getElementById('canvas') };</script>
+<canvas id="canvas" width="${w}" height="${h}" oncontextmenu="event.preventDefault()" tabindex="0"></canvas>
+<script>
+var Module = {
+  canvas: document.getElementById('canvas'),
+  locateFile: function (p) { return ${assetBaseJs} + p },
+  print: function (t) { console.log('[wasm]', t) },
+  printErr: function (t) { console.error('[wasm]', t) },
+  onAbort: function (r) { console.error('[wasm] abort', r) },
+  onExit: function (c) { console.warn('[wasm] exit', c) },
+}
+</script>
 <script src="${src}"></script>
+<script>
+window.addEventListener('load', function () {
+  var c = document.getElementById('canvas')
+  if (c) c.focus()
+})
+</script>
 </body>
 </html>`)
           return
@@ -929,7 +953,7 @@ canvas#canvas { display: block; }
           const html = doc.convert()
           const title = (html.match(/<h1[^>]*>([^<]+)<\/h1>/) ?? [])[1] ?? siteTitle
           res.setHeader('Content-Type', 'text/html; charset=utf-8')
-          res.end(renderPage(html, `${title} � ${siteTitle}`, pathname, '', navRoot, siteConfig, { customCss, templateContent }))
+          res.end(renderPage(html, `${title} — ${siteTitle}`, pathname, '', navRoot, siteConfig, { customCss, templateContent }))
         } catch { next() }
       })
     },

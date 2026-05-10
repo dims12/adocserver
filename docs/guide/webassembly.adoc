@@ -72,6 +72,12 @@ Then embed in any page:
 wasm::game.js[960,540]
 ----
 
+[TIP]
+====
+Embedded demos run in an `<iframe>` whose *inner* `window` can briefly report `innerWidth`/`innerHeight` of `0` before layout.
+If your engine reads those values during startup, pin the wasm shell document to a fixed pixel size (adocserver does this from the `wasm::` width/height) or delay init until layout settles.
+====
+
 == Live example
 
 The embed below runs a rainbow-coloured 3D cube grid with sine-wave animation.
@@ -93,11 +99,16 @@ That route serves a minimal HTML shell:
 [source,html]
 ----
 <canvas id="canvas" ...></canvas>
-<script>var Module = { canvas: document.getElementById('canvas') };</script>
+<script>var Module = {
+  canvas: document.getElementById('canvas'),
+  locateFile: function (p) { return '/wasm/' + p }
+}</script>
 <script src="/wasm/game.js"></script>
 ----
 
 Setting `Module.canvas` before the glue script loads tells Emscripten which canvas
 to use, so your application works regardless of the `-s CANVAS_ELEMENT_ID` compile flag.
+`Module.locateFile` is set so sibling `.wasm` and `.data` files resolve under `/wasm/`
+instead of the shell’s own `/_adocserver/` path (otherwise preloaded packages 404).
 The `<iframe>` isolates each embed's WebGL context and event loop so any number of
 demos can appear on the same page.
