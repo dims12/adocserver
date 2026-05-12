@@ -2,12 +2,13 @@
 
 import { createServer } from 'vite'
 import { createAdocPlugin } from '../src/plugin.js'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const assetsDir = path.resolve(__dirname, '../assets')
+const { version } = JSON.parse(readFileSync(path.resolve(__dirname, '../package.json'), 'utf8'))
 
 // ---- Arg parsing -------------------------------------------------------
 
@@ -108,4 +109,5 @@ const server = await createServer({
 })
 
 await server.listen()
+console.log(`  adocserver v${version}`)
 server.printUrls()

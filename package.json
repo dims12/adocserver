@@ -1,7 +1,7 @@
 {
   "name": "adocserver",
   "version": "0.1.15",
-  "description": "Zero-config AsciiDoc dev server with sidebar navigation and live reload",
+  "description": "Zero-config AsciiDoc dev server with sidebar navigation and live reload; suitable for preparing documentation to control LLM Agents",
   "type": "module",
   "bin": {
     "adocserver": "bin/adocserver.js"
