@@ -6,7 +6,8 @@ import path from 'node:path'
 const adoc = asciidoctor()
 
 // Matches local include:: directives (relative path, no attribute references).
-const INCLUDE_RE = /^include::([^{\[\s]+\.adoc)\[([^\]]*)\][ \t]*$/gm
+// Path ends at the '[', so spaces and non-ASCII chars are valid in the path segment.
+const INCLUDE_RE = /^include::([^{\[]+\.adoc)\[([^\]]*)\][ \t]*$/gm
 
 function applyTemplate(tmpl, slots) {
   return tmpl.replace(/\{\{(\w+)\}\}/g, (_, k) => slots[k] ?? '')
@@ -14,17 +15,19 @@ function applyTemplate(tmpl, slots) {
 
 // ---- Nav tree ----------------------------------------------------------
 
-function fileToHref(file, docsDir) {
+function fileToHref(file, docsDir, urlBase = '/docs') {
   const rel = path.relative(docsDir, file).replace(/\\/g, '/')
   if (path.basename(file) === 'index.adoc') {
     const dir = path.dirname(rel)
-    return dir === '.' ? '/docs/' : `/docs/${dir}/`
+    return dir === '.' ? `${urlBase}/` : `${urlBase}/${dir}/`
   }
-  return '/docs/' + rel
+  return `${urlBase}/${rel}`
 }
 
-function hrefToFile(pathname, docsDir) {
-  let rel = pathname.slice('/docs'.length)
+function hrefToFile(pathname, docsDir, urlBase = '/docs') {
+  let decoded
+  try { decoded = decodeURIComponent(pathname) } catch { decoded = pathname }
+  let rel = decoded.slice(urlBase.length)
   if (rel === '' || rel === '/') {
     rel = 'index.adoc'
   } else {
@@ -44,21 +47,21 @@ function readAdocTitle(file, fallback) {
   } catch { return fallback }
 }
 
-export function buildNavTree(file, docsDir, labelOverride) {
+export function buildNavTree(file, docsDir, labelOverride, urlBase = '/docs') {
   const label = labelOverride || readAdocTitle(file, path.basename(file, '.adoc'))
-  const href  = fileToHref(file, docsDir)
+  const href  = fileToHref(file, docsDir, urlBase)
   return {
     label,
     href,
     file,
-    children: buildInterleavedChildren(file, docsDir, href),
+    children: buildInterleavedChildren(file, docsDir, href, urlBase),
   }
 }
 
 // Parse the file as an ordered sequence of section headings and include
 // directives so includes are nested under the section they appear in,
 // not appended after all sections.
-function buildInterleavedChildren(file, docsDir, href) {
+function buildInterleavedChildren(file, docsDir, href, urlBase = '/docs') {
   if (!existsSync(file)) return []
   const source = readFileSync(file, 'utf8')
   const dir = path.dirname(file)
@@ -94,7 +97,7 @@ function buildInterleavedChildren(file, docsDir, href) {
       pendingAttrs = null
       continue
     }
-    const incM = line.match(/^include::([^{\[\s]+\.adoc)\[([^\]]*)\]\s*$/)
+    const incM = line.match(/^include::([^{\[]+\.adoc)\[([^\]]*)\]\s*$/)
     if (incM) {
       const childPath = path.resolve(dir, incM[1])
       if (existsSync(childPath)) {
@@ -169,7 +172,7 @@ function buildInterleavedChildren(file, docsDir, href) {
       else stack[stack.length - 1].node.children.push(node)
       stack.push({ node, level: event.level })
     } else {
-      const node = buildNavTree(event.filePath, docsDir, event.label)
+      const node = buildNavTree(event.filePath, docsDir, event.label, urlBase)
       if (stack.length === 0) roots.push(node)
       else stack[stack.length - 1].node.children.push(node)
     }
@@ -180,7 +183,7 @@ function buildInterleavedChildren(file, docsDir, href) {
 
 // ---- Preprocessing (index pages only) ----------------------------------
 
-export async function preprocessIncludes(source, dir, docsDir) {
+export async function preprocessIncludes(source, dir, docsDir, urlBase = '/docs') {
   const re = new RegExp(INCLUDE_RE.source, 'gm')
   const matches = [...source.matchAll(re)]
   if (matches.length === 0) return source
@@ -196,7 +199,7 @@ export async function preprocessIncludes(source, dir, docsDir) {
       const t = (await fs.readFile(filePath, 'utf8')).match(/^= (.+)$/m)
       label = t ? t[1].trim() : path.basename(m[1], '.adoc')
     } catch { label = path.basename(m[1], '.adoc') }
-    result = result.replace(m[0], `* link:${fileToHref(filePath, docsDir)}[${label}]`)
+    result = result.replace(m[0], `* link:${fileToHref(filePath, docsDir, urlBase)}[${label}]`)
   }
   return result
 }
@@ -253,7 +256,7 @@ function adocOptions(baseDir) {
 
 // ---- Sidebar -----------------------------------------------------------
 
-function renderSidebar(navRoot, currentPath, currentHash, siteTitle, logo) {
+function renderSidebar(navRoot, currentPath, currentHash, siteTitle, logo, urlBase = '/docs') {
   function pathOf(href) {
     const i = href.indexOf('#')
     return i >= 0 ? href.slice(0, i) : href
@@ -299,7 +302,7 @@ function renderSidebar(navRoot, currentPath, currentHash, siteTitle, logo) {
 
   const items = navRoot.children.map(n => renderNode(n, 1)).join('\n')
   return `<aside class="site-sidebar" id="site-sidebar">
-    <a class="site-brand" href="/docs/">
+    <a class="site-brand" href="${urlBase}/">
       ${brand}
     </a>
     <nav class="site-nav">
@@ -332,7 +335,7 @@ function buildHead() {
 
 // Body scripts: syntax highlighting init + sidebar resize handle.
 // Included in {{scripts}} for custom templates; placed before </body> in built-in shell.
-function buildScripts() {
+function buildScripts(urlBase = '/docs') {
   return `<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
     <script>
       document.querySelectorAll('pre code:not([data-highlighted])').forEach(el => {
@@ -517,7 +520,7 @@ function buildScripts() {
           let url
           try { url = new URL(a.href) } catch { return }
           if (url.origin !== window.location.origin) return
-          if (!url.pathname.startsWith('/docs')) return
+          if (!url.pathname.startsWith(${JSON.stringify(urlBase)})) return
           e.preventDefault()
           navigate(url.href, true)
         })
@@ -530,12 +533,12 @@ function buildScripts() {
 }
 
 function renderPage(bodyHtml, title, currentPath, currentHash, navRoot, siteConfig, opts = {}) {
-  const { customCss, templateContent } = opts
+  const { customCss, templateContent, urlBase = '/docs' } = opts
   const { siteTitle, logo, accent, accentStrong } = siteConfig
 
-  const sidebarHtml = renderSidebar(navRoot, currentPath, currentHash, siteTitle, logo)
+  const sidebarHtml = renderSidebar(navRoot, currentPath, currentHash, siteTitle, logo, urlBase)
   const head        = buildHead()
-  const scripts     = buildScripts()
+  const scripts     = buildScripts(urlBase)
 
   if (templateContent) {
     return applyTemplate(templateContent, {
@@ -763,7 +766,7 @@ function renderPage(bodyHtml, title, currentPath, currentHash, navRoot, siteConf
 
 // ---- Vite plugin -------------------------------------------------------
 
-export function createAdocPlugin({ docsDir, assetsDir, config }) {
+export function createAdocPlugin({ docsDir, assetsDir, config, urlBase = '/docs' }) {
   const siteTitle    = config.title        ?? 'Docs'
   const accent       = config.accent       ?? '#a81d2d'
   const accentStrong = config.accentStrong ?? '#7f1321'
@@ -781,7 +784,7 @@ export function createAdocPlugin({ docsDir, assetsDir, config }) {
   let navRoot
 
   function rebuildNav() {
-    navRoot = buildNavTree(DOCS_INDEX, docsDir)
+    navRoot = buildNavTree(DOCS_INDEX, docsDir, undefined, urlBase)
   }
 
   function classifyWatchedFile(file) {
@@ -888,21 +891,35 @@ window.addEventListener('load', function () {
         }
 
         // Debug: nav tree as JSON
-        if (pathname === '/docs/_nav.json') {
+        if (pathname === `${urlBase}/_nav.json`) {
           const strip = ({ label, href, children }) => ({ label, href, children: children.map(strip) })
           res.setHeader('Content-Type', 'application/json; charset=utf-8')
           res.end(JSON.stringify(strip(navRoot), null, 2))
           return
         }
 
-        // Redirect bare root ? /docs/
-        if (pathname === '/') {
-          res.writeHead(302, { Location: '/docs/' })
+        // Redirect root and any ancestor of urlBase to the docs home.
+        // e.g. with urlBase=/adocserver/docs, redirect / and /adocserver/ too.
+        const normalPath = pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
+        const isAncestor = normalPath === '' || urlBase.startsWith(normalPath + '/')
+        const isUnderBase = pathname.startsWith(urlBase)
+        if (isAncestor && !isUnderBase) {
+          res.writeHead(302, { Location: `${urlBase}/` })
           res.end()
           return
         }
 
-        if (!pathname.startsWith('/docs')) return next()
+        if (!isUnderBase) {
+          // Vite internal paths (HMR, module graph, etc.) must pass through.
+          if (pathname.startsWith('/@') || pathname.startsWith('/__')) return next()
+          // Real static files that exist in docsDir pass through to Vite.
+          const staticPath = path.resolve(docsDir, pathname.slice(1))
+          if (staticPath.startsWith(docsDir + path.sep) && existsSync(staticPath)) return next()
+          // Everything else (missing files, unrecognised paths) → docs home.
+          res.writeHead(302, { Location: `${urlBase}/` })
+          res.end()
+          return
+        }
 
         // A request is doc-shaped if it has no explicit non-.html extension
         // -- i.e. /docs, /docs/, /docs/foo, /docs/foo/, /docs/foo.html.
@@ -923,7 +940,7 @@ window.addEventListener('load', function () {
             ?? (existsSync(path.resolve(docsDir, 'template.html')) ? path.resolve(docsDir, 'template.html') : null)
           const templateContent = templateFile ? await fs.readFile(templateFile, 'utf8') : null
 
-          const filePath = hrefToFile(pathname, docsDir)
+          const filePath = hrefToFile(pathname, docsDir, urlBase)
           if (!filePath) {
             // Render a shell-wrapped 404 so the SPA can swap it in (sidebar
             // stays put, scroll position preserved). Without this, the SPA
@@ -936,24 +953,24 @@ window.addEventListener('load', function () {
               .replace(/>/g, '&gt;')
             const html = `<h1>Page not found</h1>
 <p>No document is registered at <code>${escapedPath}</code>.</p>
-<p>The link you followed may contain a typo, or the target file may have been moved or removed. Use the navigation on the left to find what you were looking for, or return to the <a href="/docs/">documentation home</a>.</p>`
+<p>The link you followed may contain a typo, or the target file may have been moved or removed. Use the navigation on the left to find what you were looking for, or return to the <a href="${urlBase}/">documentation home</a>.</p>`
             res.statusCode = 404
             res.setHeader('Content-Type', 'text/html; charset=utf-8')
-            res.end(renderPage(html, `Page not found - ${siteTitle}`, pathname, '', navRoot, siteConfig, { customCss, templateContent }))
+            res.end(renderPage(html, `Page not found - ${siteTitle}`, pathname, '', navRoot, siteConfig, { customCss, templateContent, urlBase }))
             return
           }
 
           const rawSource = await fs.readFile(filePath, 'utf8')
           const source    = preprocessWasm(
             path.basename(filePath) === 'index.adoc'
-              ? await preprocessIncludes(rawSource, path.dirname(filePath), docsDir)
+              ? await preprocessIncludes(rawSource, path.dirname(filePath), docsDir, urlBase)
               : rawSource
           )
           const doc  = adoc.load(source, adocOptions(path.dirname(filePath)))
           const html = doc.convert()
           const title = (html.match(/<h1[^>]*>([^<]+)<\/h1>/) ?? [])[1] ?? siteTitle
           res.setHeader('Content-Type', 'text/html; charset=utf-8')
-          res.end(renderPage(html, `${title} — ${siteTitle}`, pathname, '', navRoot, siteConfig, { customCss, templateContent }))
+          res.end(renderPage(html, `${title} — ${siteTitle}`, pathname, '', navRoot, siteConfig, { customCss, templateContent, urlBase }))
         } catch { next() }
       })
     },

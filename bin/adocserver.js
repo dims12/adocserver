@@ -43,10 +43,11 @@ Config file:
   process.exit(0)
 }
 
-let docsDir = null
-let port    = 3000
-let host    = '0.0.0.0'
-let open    = false
+let docsDir    = null
+let docsDirArg = null
+let port       = 3000
+let host       = '0.0.0.0'
+let open       = false
 
 for (let i = 0; i < args.length; i++) {
   if ((args[i] === '--port' || args[i] === '-p') && args[i + 1]) {
@@ -56,10 +57,16 @@ for (let i = 0; i < args.length; i++) {
     host = args[++i]; continue
   }
   if (args[i] === '--open') { open = true; continue }
-  if (!args[i].startsWith('--')) { docsDir = args[i]; continue }
+  if (!args[i].startsWith('--')) { docsDir = args[i]; docsDirArg = args[i]; continue }
 }
 
 docsDir = docsDir ? path.resolve(process.cwd(), docsDir) : process.cwd()
+
+// Derive URL base from the path argument so `adocserver docs/myslete` serves
+// at /docs/myslete/ instead of /docs/.  Fall back to /docs when no argument
+// is given or when the argument resolves to the working directory itself.
+const docsDirRel = docsDirArg ? docsDirArg.replace(/\\/g, '/').replace(/\/$/, '') : ''
+const urlBase = (docsDirRel && docsDirRel !== '.') ? `/${docsDirRel}` : '/docs'
 
 if (!existsSync(docsDir)) {
   console.error(`adocserver: directory not found: ${docsDir}`)
@@ -92,11 +99,11 @@ const server = await createServer({
   server: {
     port,
     host,
-    open: open ? '/docs/' : false,
+    open: open ? `${urlBase}/` : false,
     allowedHosts: true,
   },
   plugins: [
-    createAdocPlugin({ docsDir, assetsDir, config }),
+    createAdocPlugin({ docsDir, assetsDir, config, urlBase }),
   ],
 })
 
