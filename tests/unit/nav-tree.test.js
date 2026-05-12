@@ -232,3 +232,27 @@ test('preprocessIncludes: index page links use the included file title, not brac
   assert.match(out, /\* link:[^\[]+\[GA Library\]/, `expected "[GA Library]" link, got:\n${out}`)
   assert.doesNotMatch(out, /\[leveloffset=\+1\]/, `must not emit "[leveloffset=+1]" as the link label`)
 })
+
+test('buildNavTree: include path with spaces and non-ASCII characters is matched', () => {
+  const root = mkDocsTree({
+    'index.adoc': '= Top\n\ninclude::10 Понятия и антиморфизмы/index.adoc[]\n',
+    '10 Понятия и антиморфизмы/index.adoc': '= Понятия\n\nBody.\n',
+  })
+
+  const tree = buildNavTree(path.join(root, 'index.adoc'), root)
+  const labels = findLabels(tree)
+
+  assert.ok(labels.includes('Понятия'), `nav must include the Cyrillic child title (got: ${JSON.stringify(labels)})`)
+})
+
+test('preprocessIncludes: include path with spaces produces a percent-encoded link URL', async () => {
+  const root = mkDocsTree({
+    '15 Учебник/index.adoc': '= Учебник\n\nBody.\n',
+  })
+  const source = '= Top\n\ninclude::15 Учебник/index.adoc[]\n'
+
+  const out = await preprocessIncludes(source, root, root)
+
+  assert.doesNotMatch(out, /link:[^\[]*[ \t][^\[]*\[/, `link URL must not contain unencoded spaces (got:\n${out})`)
+  assert.match(out, /\* link:[^\[]+\[Учебник\]/, `expected "[Учебник]" link, got:\n${out}`)
+})

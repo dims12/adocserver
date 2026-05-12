@@ -16,12 +16,13 @@ function applyTemplate(tmpl, slots) {
 // ---- Nav tree ----------------------------------------------------------
 
 function fileToHref(file, docsDir, urlBase = '/docs') {
-  const rel = path.relative(docsDir, file).replace(/\\/g, '/')
+  const rel      = path.relative(docsDir, file).replace(/\\/g, '/')
+  const segments = rel.split('/').map(encodeURIComponent)
   if (path.basename(file) === 'index.adoc') {
-    const dir = path.dirname(rel)
-    return dir === '.' ? `${urlBase}/` : `${urlBase}/${dir}/`
+    const dirSegs = segments.slice(0, -1)
+    return dirSegs.length === 0 ? `${urlBase}/` : `${urlBase}/${dirSegs.join('/')}/`
   }
-  return `${urlBase}/${rel}`
+  return `${urlBase}/${segments.join('/')}`
 }
 
 function hrefToFile(pathname, docsDir, urlBase = '/docs') {
