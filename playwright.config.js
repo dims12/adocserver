@@ -22,7 +22,7 @@ export default defineConfig({
   ],
   webServer: {
     command: `node bin/adocserver.js docs --port ${PORT} --host 127.0.0.1`,
-    url: `${BASE_URL}/docs/`,
+    url: `${BASE_URL}/docs/index.adoc`,
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,
     stdout: 'ignore',

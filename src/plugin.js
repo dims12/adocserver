@@ -20,7 +20,8 @@ function fileToHref(file, docsDir, urlBase = '/docs') {
   const segments = rel.split('/').map(encodeURIComponent)
   if (path.basename(file) === 'index.adoc') {
     const dirSegs = segments.slice(0, -1)
-    return dirSegs.length === 0 ? `${urlBase}/` : `${urlBase}/${dirSegs.join('/')}/`
+    const dir = dirSegs.length === 0 ? urlBase : `${urlBase}/${dirSegs.join('/')}`
+    return `${dir}/index.adoc`
   }
   return `${urlBase}/${segments.join('/')}`
 }
@@ -43,20 +44,27 @@ function hrefToFile(pathname, docsDir, urlBase = '/docs') {
 
 function readAdocTitle(file, fallback) {
   try {
-    const m = readFileSync(file, 'utf8').match(/^= (.+)$/m)
-    return m ? m[1].trim() : fallback
+    for (const raw of readFileSync(file, 'utf8').replace(/^﻿/, '').split('\n')) {
+      const line = raw.trimEnd()
+      if (line === '' || line.startsWith('//')) continue  // blank or comment
+      const m = line.match(/^= (.+)$/)
+      return m ? m[1].trim() : fallback  // first real line: title or not
+    }
+    return fallback
   } catch { return fallback }
 }
 
+// For index.adoc files the meaningful name is the parent directory, not "index".
+function titleFallback(file) {
+  const base = path.basename(file, '.adoc')
+  return base === 'index' ? path.basename(path.dirname(file)) : base
+}
+
 export function buildNavTree(file, docsDir, labelOverride, urlBase = '/docs') {
-  const label = labelOverride || readAdocTitle(file, path.basename(file, '.adoc'))
-  const href  = fileToHref(file, docsDir, urlBase)
-  return {
-    label,
-    href,
-    file,
-    children: buildInterleavedChildren(file, docsDir, href, urlBase),
-  }
+  const label    = labelOverride || readAdocTitle(file, titleFallback(file))
+  const href     = fileToHref(file, docsDir, urlBase)
+  const children = buildInterleavedChildren(file, docsDir, href, urlBase)
+  return { label, href, file, children }
 }
 
 // Parse the file as an ordered sequence of section headings and include
@@ -106,7 +114,7 @@ function buildInterleavedChildren(file, docsDir, href, urlBase = '/docs') {
         // (leveloffset=+1, lines=1..5, tag=foo, indent=N, ...), NOT a
         // label override. The nav label must come from the included
         // file's "= Title" heading, never from bracket content.
-        const label = readAdocTitle(childPath, path.basename(incM[1], '.adoc'))
+        const label = readAdocTitle(childPath, titleFallback(childPath))
         events.push({ type: 'include', filePath: childPath, label })
       }
       pendingAttrs = null
@@ -173,7 +181,15 @@ function buildInterleavedChildren(file, docsDir, href, urlBase = '/docs') {
       else stack[stack.length - 1].node.children.push(node)
       stack.push({ node, level: event.level })
     } else {
-      const node = buildNavTree(event.filePath, docsDir, event.label, urlBase)
+      let node = buildNavTree(event.filePath, docsDir, event.label, urlBase)
+      // Collapse single-section wrapper: if the included file's only top-level
+      // item is one section (not a sub-include), that section is just echoing
+      // the document title and creates a redundant nav level.  Keep the include
+      // node (label + file href) but promote the section's children up so the
+      // same name doesn't appear twice.
+      if (node.children.length === 1 && !('file' in node.children[0])) {
+        node = { ...node, children: node.children[0].children }
+      }
       if (stack.length === 0) roots.push(node)
       else stack[stack.length - 1].node.children.push(node)
     }
@@ -197,9 +213,15 @@ export async function preprocessIncludes(source, dir, docsDir, urlBase = '/docs'
     // the included file's "= Title" heading.
     let label
     try {
-      const t = (await fs.readFile(filePath, 'utf8')).match(/^= (.+)$/m)
-      label = t ? t[1].trim() : path.basename(m[1], '.adoc')
-    } catch { label = path.basename(m[1], '.adoc') }
+      label = titleFallback(filePath)
+      for (const raw of (await fs.readFile(filePath, 'utf8')).replace(/^﻿/, '').split('\n')) {
+        const line = raw.trimEnd()
+        if (line === '' || line.startsWith('//')) continue
+        const t = line.match(/^= (.+)$/)
+        if (t) label = t[1].trim()
+        break
+      }
+    } catch { label = titleFallback(filePath) }
     result = result.replace(m[0], `* link:${fileToHref(filePath, docsDir, urlBase)}[${label}]`)
   }
   return result
@@ -248,7 +270,7 @@ function adocOptions(baseDir) {
       showtitle: true,
       icons: 'font',
       sectanchors: true,
-      toc: 'left',
+      toc: false,
       imagesdir: '/images',
       doctype: 'book',
     },
@@ -303,7 +325,7 @@ function renderSidebar(navRoot, currentPath, currentHash, siteTitle, logo, urlBa
 
   const items = navRoot.children.map(n => renderNode(n, 1)).join('\n')
   return `<aside class="site-sidebar" id="site-sidebar">
-    <a class="site-brand" href="${urlBase}/">
+    <a class="site-brand" href="${urlBase}/index.adoc">
       ${brand}
     </a>
     <nav class="site-nav">
@@ -818,7 +840,9 @@ export function createAdocPlugin({ docsDir, assetsDir, config, urlBase = '/docs'
 
       server.middlewares.use(async (req, res, next) => {
         if (!req.url) return next()
-        const pathname = new URL(req.url, 'http://localhost').pathname
+        const parsedUrl  = new URL(req.url, 'http://localhost')
+        const pathname   = parsedUrl.pathname
+        const wantSource = parsedUrl.searchParams.has('source')
 
         // WebAssembly iframe shell
         if (pathname === '/_adocserver/wasm-shell') {
@@ -905,7 +929,7 @@ window.addEventListener('load', function () {
         const isAncestor = normalPath === '' || urlBase.startsWith(normalPath + '/')
         const isUnderBase = pathname.startsWith(urlBase)
         if (isAncestor && !isUnderBase) {
-          res.writeHead(302, { Location: `${urlBase}/` })
+          res.writeHead(302, { Location: `${urlBase}/index.adoc` })
           res.end()
           return
         }
@@ -917,13 +941,21 @@ window.addEventListener('load', function () {
           const staticPath = path.resolve(docsDir, pathname.slice(1))
           if (staticPath.startsWith(docsDir + path.sep) && existsSync(staticPath)) return next()
           // Everything else (missing files, unrecognised paths) → docs home.
-          res.writeHead(302, { Location: `${urlBase}/` })
+          res.writeHead(302, { Location: `${urlBase}/index.adoc` })
+          res.end()
+          return
+        }
+
+        // Directory URLs implicitly serve index.adoc; redirect to the explicit
+        // path so the browser URL always reflects the real file being shown.
+        if (pathname.endsWith('/')) {
+          res.writeHead(302, { Location: pathname + 'index.adoc' })
           res.end()
           return
         }
 
         // A request is doc-shaped if it has no explicit non-.html extension
-        // -- i.e. /docs, /docs/, /docs/foo, /docs/foo/, /docs/foo.html.
+        // -- i.e. /docs, /docs/foo, /docs/foo.html, /docs/foo.adoc.
         // Anything else (e.g. /docs/images/foo.png, /docs/custom.css) is a
         // static asset and must be deferred to Vite. Without this guard the
         // missing-page 404 below would shadow every static asset under /docs.
@@ -954,7 +986,7 @@ window.addEventListener('load', function () {
               .replace(/>/g, '&gt;')
             const html = `<h1>Page not found</h1>
 <p>No document is registered at <code>${escapedPath}</code>.</p>
-<p>The link you followed may contain a typo, or the target file may have been moved or removed. Use the navigation on the left to find what you were looking for, or return to the <a href="${urlBase}/">documentation home</a>.</p>`
+<p>The link you followed may contain a typo, or the target file may have been moved or removed. Use the navigation on the left to find what you were looking for, or return to the <a href="${urlBase}/index.adoc">documentation home</a>.</p>`
             res.statusCode = 404
             res.setHeader('Content-Type', 'text/html; charset=utf-8')
             res.end(renderPage(html, `Page not found - ${siteTitle}`, pathname, '', navRoot, siteConfig, { customCss, templateContent, urlBase }))
@@ -967,6 +999,13 @@ window.addEventListener('load', function () {
               ? await preprocessIncludes(rawSource, path.dirname(filePath), docsDir, urlBase)
               : rawSource
           )
+
+          if (wantSource) {
+            res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+            res.end(source)
+            return
+          }
+
           const doc  = adoc.load(source, adocOptions(path.dirname(filePath)))
           const html = doc.convert()
           const title = (html.match(/<h1[^>]*>([^<]+)<\/h1>/) ?? [])[1] ?? siteTitle

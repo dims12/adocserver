@@ -100,7 +100,7 @@ const server = await createServer({
   server: {
     port,
     host,
-    open: open ? `${urlBase}/` : false,
+    open: open ? `${urlBase}/index.adoc` : false,
     allowedHosts: true,
   },
   plugins: [

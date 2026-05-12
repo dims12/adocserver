@@ -245,6 +245,64 @@ test('buildNavTree: include path with spaces and non-ASCII characters is matched
   assert.ok(labels.includes('Понятия'), `nav must include the Cyrillic child title (got: ${JSON.stringify(labels)})`)
 })
 
+test('buildNavTree: single top-level section in included file is collapsed (no duplicate nav level)', () => {
+  // Reproduces the pattern where index.adoc has both a document title (= T)
+  // and a single top-level section (== T) that echoes it, causing two nav
+  // entries with the same name.  The == wrapper should be absorbed.
+  const root = mkDocsTree({
+    'index.adoc': '= Top\n\ninclude::chapter/index.adoc[]\n',
+    'chapter/index.adoc': [
+      '= Chapter Title',
+      '',
+      '== Chapter Title',
+      '',
+      'Body.',
+      '',
+      '=== Sub A',
+      '',
+      '=== Sub B',
+    ].join('\n'),
+  })
+
+  const tree = buildNavTree(path.join(root, 'index.adoc'), root)
+
+  const chapter = tree.children[0]
+  assert.equal(chapter?.label, 'Chapter Title', `include node must be labeled by file title`)
+
+  // The == Chapter Title wrapper must NOT appear as a child
+  const childLabels = chapter?.children.map(c => c.label) ?? []
+  assert.ok(!childLabels.includes('Chapter Title'),
+    `== wrapper section must not appear as child (got: ${JSON.stringify(childLabels)})`)
+
+  // Its subsections must be promoted directly under the chapter node
+  assert.ok(childLabels.includes('Sub A'), `Sub A must be a direct child (got: ${JSON.stringify(childLabels)})`)
+  assert.ok(childLabels.includes('Sub B'), `Sub B must be a direct child (got: ${JSON.stringify(childLabels)})`)
+})
+
+test('buildNavTree: multiple top-level sections are NOT collapsed (nesting is meaningful)', () => {
+  const root = mkDocsTree({
+    'index.adoc': '= Top\n\ninclude::chapter/index.adoc[]\n',
+    'chapter/index.adoc': [
+      '= Chapter Title',
+      '',
+      '== Section A',
+      '',
+      '=== Sub A1',
+      '',
+      '== Section B',
+      '',
+      '=== Sub B1',
+    ].join('\n'),
+  })
+
+  const tree = buildNavTree(path.join(root, 'index.adoc'), root)
+  const chapter = tree.children[0]
+  const childLabels = chapter?.children.map(c => c.label) ?? []
+
+  assert.ok(childLabels.includes('Section A'), `Section A must remain (got: ${JSON.stringify(childLabels)})`)
+  assert.ok(childLabels.includes('Section B'), `Section B must remain (got: ${JSON.stringify(childLabels)})`)
+})
+
 test('preprocessIncludes: include path with spaces produces a percent-encoded link URL', async () => {
   const root = mkDocsTree({
     '15 Учебник/index.adoc': '= Учебник\n\nBody.\n',
